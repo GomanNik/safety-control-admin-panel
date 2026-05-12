@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+opencv-python
+numpy
+ultralytics
+onnxruntime
+scipy
+boxmot
+pytest-asyncio
