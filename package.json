@@ -1,0 +1,56 @@
+{
+  "name": "safety-control-admin-panel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "private": true,
+  "vitest": {
+    "test": {
+      "environment": "jsdom"
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:unit:entities": "vitest run tests/unit/entities",
+    "test:unit:incident": "vitest run tests/unit/entities/incident",
+    "test:unit:camera": "vitest run tests/unit/entities/camera",
+    "test:unit:site": "vitest run tests/unit/entities/site",
+    "test:unit:user": "vitest run tests/unit/entities/user",
+    "test:unit:report": "vitest run tests/unit/entities/report"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.10",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-router-dom": "^7.10.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.5",
+    "@types/react": "^19.2.6",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "jsdom": "^27.2.0",
+    "msw": "^2.12.7",
+    "ts-morph": "^27.0.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.3",
+    "vite": "8.0.5",
+    "vitest": "^4.0.12"
+  },
+  "packageManager": "pnpm@10.18.3+sha512.bbd16e6d7286fd7e01f6b3c0b3c932cda2965c06a908328f74663f10a9aea51f1129eea615134bf992831b009eabe167ecb7008b597f40ff9bc75946aadfb08d",
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+/* =====================
+   src/app/layout/app-layout.css
+   ===================== */
+
+/* =============================
+   App shell layout
+   Только каркас приложения.
+   ============================= */
+
+.app-layout {
+    min-height: var(--viewport-height);
+    width: 100%;
+    background: var(--color-bg-primary);
+}
+
+.app-layout__content {
+    width: 100%;
+    max-width: var(--content-max-width);
+    margin: 0 auto;
+    box-sizing: border-box;
+    padding-left: max(var(--content-gutter), var(--safe-area-left));
+    padding-right: max(var(--content-gutter), var(--safe-area-right));
+}

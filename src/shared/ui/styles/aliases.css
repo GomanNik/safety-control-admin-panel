@@ -1,0 +1,150 @@
+/* =====================
+   src/shared/ui/styles/aliases.css
+   ===================== */
+
+:root {
+    /* ---------- Containers / workspace ---------- */
+    --ui-container-max-width: var(--content-max-width);
+    --ui-page-pad-x: var(--content-gutter);
+    --ui-workspace-pad-top: clamp(20px, 2.5vw, 28px);
+    --ui-workspace-pad-bottom: clamp(28px, 3vw, 40px);
+    --ui-workspace-gap: var(--space-xl-effective);
+    --ui-section-gap: var(--space-lg-effective);
+    --ui-section-stack-gap: var(--space-md-effective);
+    --ui-title-max-width: 72ch;
+
+    /* ---------- Controls ---------- */
+    --ui-control-height-sm: 34px;
+    --ui-control-height-md: 40px;
+    --ui-control-height-lg: 46px;
+
+    --ui-control-pad-x-sm: 12px;
+    --ui-control-pad-x-md: 14px;
+    --ui-control-pad-x-lg: 16px;
+
+    --ui-control-radius: var(--radius-md-effective);
+    --ui-control-radius-lg: var(--radius-lg-effective);
+
+    /* ---------- Common pattern sizing ---------- */
+    --ui-chip-height: 36px;
+    --ui-status-chip-height: 36px;
+    --ui-kpi-card-min-height: 138px;
+    --ui-kpi-aside-min: 260px;
+    --ui-kpi-aside-max: 320px;
+    --ui-kpi-meta-min-height: 38px;
+    --ui-bar-strip-column-min: 52px;
+    --ui-bar-strip-height: 164px;
+    --ui-bar-strip-bar-max-width: 28px;
+
+    /* ---------- Borders / surfaces ---------- */
+    --ui-border: var(--color-border);
+    --ui-border-strong: var(--color-border-strong);
+
+    --ui-surface: var(--color-bg-elevated);
+    --ui-surface-2: color-mix(
+            in srgb,
+            var(--color-bg-secondary) 62%,
+            var(--color-bg-elevated) 38%
+    );
+    --ui-surface-muted: color-mix(
+            in srgb,
+            var(--color-text-primary) 4%,
+            var(--color-bg-elevated) 96%
+    );
+
+    --ui-surface-success: color-mix(
+            in srgb,
+            var(--color-success) 12%,
+            var(--color-bg-elevated) 88%
+    );
+    --ui-surface-warning: color-mix(
+            in srgb,
+            var(--color-warning) 14%,
+            var(--color-bg-elevated) 86%
+    );
+    --ui-surface-danger: color-mix(
+            in srgb,
+            var(--color-danger) 12%,
+            var(--color-bg-elevated) 88%
+    );
+    --ui-surface-info: color-mix(
+            in srgb,
+            var(--color-info) 12%,
+            var(--color-bg-elevated) 88%
+    );
+
+    --ui-border-success: color-mix(
+            in srgb,
+            var(--color-success) 34%,
+            var(--ui-border) 66%
+    );
+    --ui-border-warning: color-mix(
+            in srgb,
+            var(--color-warning) 38%,
+            var(--ui-border) 62%
+    );
+    --ui-border-danger: color-mix(
+            in srgb,
+            var(--color-danger) 36%,
+            var(--ui-border) 64%
+    );
+    --ui-border-info: color-mix(
+            in srgb,
+            var(--color-info) 34%,
+            var(--ui-border) 66%
+    );
+
+    /* ---------- Focus / overlay / shadow ---------- */
+    --ui-ring: 0 0 0 3px var(--color-focus-ring);
+    --ui-ring-strong: 0 0 0 3px var(--color-focus-ring-strong);
+
+    --ui-shadow-card: var(--shadow-xs);
+    --ui-shadow-hover: var(--shadow-sm);
+    --ui-shadow-overlay: var(--shadow-lg);
+
+    --ui-overlay-bg: color-mix(
+            in srgb,
+            var(--color-text-primary) 42%,
+            transparent
+    );
+
+    /* ---------- Motion ---------- */
+    --ui-transition-fast: var(--transition-fast);
+    --ui-transition: var(--transition);
+    --ui-transition-slow: var(--transition-slow);
+
+    /* ---------- Text ---------- */
+    --ui-text-subtle: var(--color-text-secondary);
+    --ui-text-muted: var(--color-text-muted);
+    --ui-text-neutral: color-mix(
+            in srgb,
+            var(--color-text-secondary) 74%,
+            var(--color-text-primary) 26%
+    );
+    --ui-text-success: color-mix(
+            in srgb,
+            var(--color-success) 68%,
+            var(--color-text-primary) 32%
+    );
+    --ui-text-warning: color-mix(
+            in srgb,
+            var(--color-warning) 70%,
+            var(--color-text-primary) 30%
+    );
+    --ui-text-danger: color-mix(
+            in srgb,
+            var(--color-danger) 72%,
+            var(--color-text-primary) 28%
+    );
+    --ui-text-info: color-mix(
+            in srgb,
+            var(--color-info) 68%,
+            var(--color-text-primary) 32%
+    );
+
+    /* ---------- Semantic base colors ---------- */
+    --ui-danger: var(--color-danger);
+    --ui-warning: var(--color-warning);
+    --ui-success: var(--color-success);
+    --ui-info: var(--color-info);
+}

@@ -1,0 +1,1096 @@
+﻿/* =====================
+   File: src/widgets/overview/DashboardWorkspaceWidget/DashboardWorkspaceWidget.css
+   Purpose:
+   - Shared styles for DashboardWorkspaceWidget
+   - Keeps incidents card equal-height with sites card only while sites list is collapsed
+   - Prevents incidents card from stretching when sites list is expanded
+   - Uses page-level incident report action in widget header
+   - Keeps chart axis titles inside SVG instead of external rotated HTML labels
+   ===================== */
+
+/* ========================================
+   Shared layout / page header / common section elements
+   ======================================== */
+
+.dashboard-workspace-widget {
+    color: var(--color-text-primary);
+}
+
+.dashboard-workspace-widget__page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+}
+
+.dashboard-workspace-widget__header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+}
+
+.dashboard-workspace-widget__header-action-button {
+    min-height: 40px;
+    white-space: nowrap;
+}
+
+.dashboard-workspace-widget .ui-workspace__two-column {
+    align-items: start;
+}
+
+.dashboard-workspace-widget .ui-workspace__two-column > .ui-workspace__section-card {
+    align-self: start;
+    height: auto;
+    min-height: 0;
+}
+
+@media (min-width: 901px) {
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )),
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) {
+        align-items: stretch;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )) > .ui-workspace__section-card,
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) > .ui-workspace__section-card {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 100%;
+        align-self: stretch;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )) > .ui-workspace__section-card > *:last-child,
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) > .ui-workspace__section-card > *:last-child {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+}
+
+.dashboard-workspace-widget__section-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+}
+
+.dashboard-workspace-widget__section-toolbar-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.dashboard-workspace-widget__section-toolbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.dashboard-workspace-widget__group-toggle,
+.dashboard-workspace-widget__sites-toggle,
+.dashboard-workspace-widget__period-preset,
+.dashboard-workspace-widget__period-apply,
+.dashboard-workspace-widget__camera-group-toggle {
+    font: inherit;
+}
+
+.dashboard-workspace-widget__group-toggle,
+.dashboard-workspace-widget__sites-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: 999px;
+    background: var(--ui-surface);
+    color: var(--color-text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: var(--ui-shadow-card);
+    cursor: pointer;
+    transition:
+            border-color var(--ui-transition),
+            background-color var(--ui-transition),
+            box-shadow var(--ui-transition),
+            transform var(--ui-transition-fast);
+}
+
+.dashboard-workspace-widget__group-toggle {
+    width: 100%;
+    padding: 0 14px;
+}
+
+.dashboard-workspace-widget__group-toggle:hover,
+.dashboard-workspace-widget__sites-toggle:hover,
+.dashboard-workspace-widget__period-preset:hover,
+.dashboard-workspace-widget__camera-group-toggle:hover {
+    border-color: var(--ui-border-strong);
+    background: var(--ui-surface-2);
+    box-shadow: var(--ui-shadow-hover);
+}
+
+.dashboard-workspace-widget__group-toggle:focus-visible,
+.dashboard-workspace-widget__sites-toggle:focus-visible,
+.dashboard-workspace-widget__period-preset:focus-visible,
+.dashboard-workspace-widget__period-apply:focus-visible,
+.dashboard-workspace-widget__period-date-input:focus-visible,
+.dashboard-workspace-widget__camera-group-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--ui-ring);
+}
+
+.dashboard-workspace-widget__group-toggle:active,
+.dashboard-workspace-widget__sites-toggle:active,
+.dashboard-workspace-widget__period-apply:active,
+.dashboard-workspace-widget__camera-group-toggle:active {
+    transform: translateY(1px);
+}
+
+.dashboard-workspace-widget__group-toggle-icon,
+.dashboard-workspace-widget__sites-toggle-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    transition: transform var(--ui-transition-fast);
+}
+
+.dashboard-workspace-widget__group-toggle-icon--expanded,
+.dashboard-workspace-widget__sites-toggle-icon--expanded {
+    transform: rotate(180deg);
+}
+
+.dashboard-workspace-widget__title-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition:
+            color var(--ui-transition),
+            border-color var(--ui-transition);
+}
+
+.dashboard-workspace-widget__title-link:hover {
+    color: var(--color-primary);
+    border-bottom-color: color-mix(
+            in srgb,
+            var(--color-primary) 45%,
+            transparent
+    );
+}
+
+.dashboard-workspace-widget__title-link:focus-visible {
+    outline: none;
+    border-bottom-color: var(--color-primary);
+    box-shadow: var(--ui-ring);
+    border-radius: 4px;
+}
+
+/* ========================================
+   DashboardKpiSection.tsx
+   ======================================== */
+
+.dashboard-workspace-widget__incident-time {
+    color: var(--color-text-muted);
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+/* ========================================
+   DashboardSitesHealthSection.tsx
+   ======================================== */
+
+.dashboard-workspace-widget__entity-subtitle {
+    color: var(--color-text-secondary);
+    line-height: var(--line-height-relaxed);
+}
+
+.dashboard-workspace-widget__sites-toggle-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+/* ========================================
+   DashboardIncidentsTrendSection.tsx
+   ======================================== */
+
+.dashboard-workspace-widget__incidents-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+    width: 100%;
+}
+
+.dashboard-workspace-widget__incidents-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__period-toolbar {
+    display: grid;
+    gap: 10px;
+    justify-items: end;
+    align-content: start;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__period-presets {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+
+.dashboard-workspace-widget__period-preset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--ui-border);
+    border-radius: 999px;
+    background: var(--ui-surface-2);
+    color: var(--ui-text-neutral);
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+            border-color var(--ui-transition),
+            background-color var(--ui-transition),
+            color var(--ui-transition),
+            box-shadow var(--ui-transition);
+}
+
+.dashboard-workspace-widget__period-preset:hover {
+    border-color: var(--ui-border-info);
+    background: var(--ui-surface-info);
+    color: var(--ui-text-info);
+}
+
+.dashboard-workspace-widget__period-preset--active {
+    border-color: var(--ui-border-info);
+    background: var(--ui-surface-info);
+    color: var(--ui-text-info);
+}
+
+.dashboard-workspace-widget__period-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.dashboard-workspace-widget__period-date-fields {
+    display: grid;
+    grid-template-columns: minmax(152px, 1fr) auto minmax(152px, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__period-date-separator {
+    color: var(--color-text-secondary);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.dashboard-workspace-widget__period-date-input {
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--ui-border);
+    border-radius: 12px;
+    background: var(--ui-surface);
+    color: var(--color-text-primary);
+    font: inherit;
+    transition:
+            border-color var(--ui-transition),
+            box-shadow var(--ui-transition),
+            background-color var(--ui-transition);
+}
+
+.dashboard-workspace-widget__period-date-input:hover {
+    border-color: var(--ui-border-strong);
+}
+
+.dashboard-workspace-widget__period-date-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: var(--ui-ring);
+}
+
+.dashboard-workspace-widget__period-apply {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid var(--color-primary);
+    border-radius: 12px;
+    background: var(--color-primary);
+    color: var(--color-bg-elevated);
+    font-size: 14px;
+    font-weight: 700;
+    box-shadow: var(--ui-shadow-card);
+    cursor: pointer;
+    transition:
+            background-color var(--ui-transition),
+            border-color var(--ui-transition),
+            box-shadow var(--ui-transition),
+            transform var(--ui-transition-fast);
+}
+
+.dashboard-workspace-widget__period-apply:hover {
+    background: var(--color-primary-strong);
+    border-color: var(--color-primary-strong);
+    box-shadow: var(--ui-shadow-hover);
+}
+
+.dashboard-workspace-widget__period-apply:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.dashboard-workspace-widget__chart-card {
+    display: grid;
+    height: auto;
+    min-height: 0;
+}
+
+.dashboard-workspace-widget__chart-shell {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 320px;
+    overflow: hidden;
+    border: 1px solid var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface-2);
+    box-shadow: inset 0 1px 0 color-mix(
+            in srgb,
+            var(--color-bg-elevated) 34%,
+            transparent
+    );
+}
+
+.dashboard-workspace-widget__chart-svg {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 320px;
+}
+
+@media (min-width: 901px) {
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-card,
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-card {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-shell,
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-shell {
+        flex: 1 1 auto;
+        height: 100%;
+        min-height: 220px;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column:not(:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle
+    )) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-svg,
+    .dashboard-workspace-widget .ui-workspace__two-column:has(
+        > .ui-workspace__section-card:first-child .dashboard-workspace-widget__sites-toggle[aria-expanded="false"]
+    ) > .ui-workspace__section-card:last-child .dashboard-workspace-widget__chart-svg {
+        height: 100%;
+        min-height: 220px;
+    }
+}
+
+.dashboard-workspace-widget__chart-grid-line {
+    stroke: color-mix(
+            in srgb,
+            var(--ui-border) 84%,
+            transparent
+    );
+    stroke-width: 1;
+}
+
+.dashboard-workspace-widget__chart-grid-line--vertical {
+    stroke-dasharray: 4 6;
+}
+
+.dashboard-workspace-widget__chart-axis-line {
+    stroke: color-mix(
+            in srgb,
+            var(--ui-border-strong) 92%,
+            transparent
+    );
+    stroke-width: 1.2;
+}
+
+.dashboard-workspace-widget__chart-axis-label {
+    fill: var(--color-text-primary);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.dashboard-workspace-widget__chart-axis-title {
+    fill: var(--color-text-primary);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.dashboard-workspace-widget__chart-area {
+    fill: color-mix(
+            in srgb,
+            var(--color-primary) 14%,
+            transparent
+    );
+}
+
+.dashboard-workspace-widget__chart-line {
+    fill: none;
+    stroke: var(--color-primary);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dashboard-workspace-widget__chart-point {
+    fill: var(--ui-surface);
+    stroke: var(--color-primary);
+    stroke-width: 3;
+}
+
+/* ========================================
+   DashboardIncidentReportModal.tsx
+   ======================================== */
+
+.dashboard-workspace-widget__report-modal {
+    width: min(960px, calc(100vw - 32px));
+    max-width: 960px;
+}
+
+.dashboard-workspace-widget__report-modal-form {
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__report-modal-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.92fr);
+    gap: 18px;
+    min-width: 0;
+    align-items: start;
+}
+
+.dashboard-workspace-widget__report-period-grid {
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__report-sites-title {
+    display: block;
+    color: var(--color-text-primary);
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.dashboard-workspace-widget__report-sites-list {
+    min-width: 0;
+    border: 1px solid var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface-2);
+}
+
+.dashboard-workspace-widget__report-sites-list-scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 14px;
+    scrollbar-gutter: stable;
+}
+
+.dashboard-workspace-widget__report-sites-empty {
+    padding: 14px 16px;
+    border: 1px dashed var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface-2);
+}
+
+.dashboard-workspace-widget__report-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+}
+
+.dashboard-workspace-widget__report-summary {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.dashboard-workspace-widget__report-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* ========================================
+   DashboardCamerasBySiteSection.tsx
+   ======================================== */
+
+.dashboard-workspace-widget__camera-master-detail {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.92fr) minmax(0, 1.68fr);
+    gap: 18px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-sites-nav {
+    min-width: 0;
+    padding-right: 18px;
+    border-right: 1px solid var(--ui-border);
+}
+
+.dashboard-workspace-widget__camera-sites-nav-list {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-button {
+    display: block;
+    width: 100%;
+    padding: 14px 14px 14px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface);
+    text-align: left;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition:
+            border-color var(--ui-transition),
+            background-color var(--ui-transition),
+            box-shadow var(--ui-transition),
+            transform var(--ui-transition-fast);
+}
+
+.dashboard-workspace-widget__camera-site-button:hover {
+    border-color: var(--ui-border-strong);
+    background: var(--ui-surface-2);
+    box-shadow: var(--ui-shadow-hover);
+}
+
+.dashboard-workspace-widget__camera-site-button:focus-visible {
+    outline: none;
+    box-shadow: var(--ui-ring);
+}
+
+.dashboard-workspace-widget__camera-site-button--selected {
+    border-color: var(--color-primary);
+    background: color-mix(
+            in srgb,
+            var(--color-primary) 6%,
+            var(--ui-surface)
+    );
+    box-shadow: inset 0 0 0 1px color-mix(
+            in srgb,
+            var(--color-primary) 20%,
+            transparent
+    );
+}
+
+.dashboard-workspace-widget__camera-site-button-copy {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-button-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-button-meta-item {
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.dashboard-workspace-widget__camera-site-detail {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-detail-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-detail-count {
+    white-space: nowrap;
+    text-align: right;
+}
+
+.dashboard-workspace-widget__camera-site-detail-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.dashboard-workspace-widget__camera-site-stat {
+    display: grid;
+    gap: 6px;
+    padding: 12px 14px;
+    border: 1px solid var(--ui-border);
+    border-radius: 14px;
+    background: var(--ui-surface-2);
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-site-stat-label {
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.dashboard-workspace-widget__camera-site-stat-value {
+    color: var(--color-text-primary);
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 700;
+}
+
+.dashboard-workspace-widget__camera-detail-list {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-detail-card {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    padding: 14px 14px 14px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface);
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-detail-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--ui-border);
+}
+
+.dashboard-workspace-widget__camera-detail-card--critical::before {
+    background: var(--ui-danger);
+}
+
+.dashboard-workspace-widget__camera-detail-card--warning::before {
+    background: var(--ui-warning);
+}
+
+.dashboard-workspace-widget__camera-detail-card--success::before {
+    background: var(--ui-success);
+}
+
+.dashboard-workspace-widget__camera-detail-card--info::before {
+    background: var(--ui-info);
+}
+
+.dashboard-workspace-widget__camera-detail-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+}
+
+.dashboard-workspace-widget__camera-detail-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-detail-reason {
+    color: var(--color-text-secondary);
+    line-height: var(--line-height-relaxed);
+}
+
+.dashboard-workspace-widget__camera-detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    min-width: 0;
+}
+
+.dashboard-workspace-widget__camera-detail-meta-item {
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+/* ========================================
+   Responsive additions for cameras by site
+   ======================================== */
+
+@media (max-width: 1100px) {
+    .dashboard-workspace-widget__camera-master-detail {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-workspace-widget__camera-sites-nav {
+        padding-right: 0;
+        padding-bottom: 2px;
+        border-right: none;
+        border-bottom: 1px solid var(--ui-border);
+    }
+
+    .dashboard-workspace-widget__report-modal-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ========================================
+   Responsive
+   ======================================== */
+
+@media (max-width: 1180px) {
+    .dashboard-workspace-widget__incidents-head {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-workspace-widget__period-toolbar {
+        justify-items: start;
+    }
+
+    .dashboard-workspace-widget__period-range {
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 900px) {
+    .dashboard-workspace-widget__page-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dashboard-workspace-widget__header-actions {
+        justify-content: flex-start;
+    }
+
+    .dashboard-workspace-widget__section-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dashboard-workspace-widget__section-toolbar-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        white-space: normal;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column {
+        align-items: initial;
+    }
+
+    .dashboard-workspace-widget .ui-workspace__two-column > .ui-workspace__section-card {
+        display: block;
+        height: auto;
+        min-height: 0;
+        align-self: auto;
+    }
+
+    .dashboard-workspace-widget__period-date-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-workspace-widget__period-date-separator {
+        display: none;
+    }
+
+    .dashboard-workspace-widget__chart-shell {
+        min-height: 240px;
+    }
+
+    .dashboard-workspace-widget__chart-svg {
+        min-height: 240px;
+    }
+
+    .dashboard-workspace-widget__report-modal {
+        width: min(100vw - 24px, 960px);
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-workspace-widget__camera-site-detail-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dashboard-workspace-widget__camera-site-detail-count {
+        text-align: left;
+        white-space: normal;
+    }
+
+    .dashboard-workspace-widget__camera-site-detail-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-workspace-widget__camera-detail-top {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-workspace-widget__report-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dashboard-workspace-widget__report-actions {
+        justify-content: stretch;
+        flex-wrap: wrap;
+        white-space: normal;
+    }
+
+    .dashboard-workspace-widget__report-actions > * {
+        flex: 1 1 auto;
+    }
+
+    .dashboard-workspace-widget__chart-shell {
+        padding: 0;
+    }
+}
+
+/* ========================================
+   DashboardSectionHelpPopover
+   ======================================== */
+
+.ui-help-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    overflow: hidden;
+    background: rgb(15 23 42 / 36%);
+    backdrop-filter: blur(6px);
+}
+
+.ui-help-dialog-shell {
+    width: min(760px, 100%);
+    height: calc(100dvh - 32px);
+    max-height: calc(100dvh - 32px);
+    min-height: 0;
+}
+
+.ui-help-dialog.ui-help-dialog--compact {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 24px;
+}
+
+.ui-help-dialog.ui-help-dialog--compact .ui-card__body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 28px;
+    padding-bottom: 28px;
+    box-sizing: border-box;
+    scrollbar-gutter: stable;
+}
+
+.ui-help-dialog__content {
+    display: grid;
+    gap: 18px;
+    align-content: start;
+    min-height: 100%;
+    box-sizing: border-box;
+}
+
+.ui-help-dialog__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.ui-help-dialog__title-block {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ui-help-dialog__subtitle {
+    max-width: 62ch;
+    line-height: 1.5;
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+.ui-help-dialog__close {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid var(--ui-border);
+    border-radius: 999px;
+    background: var(--ui-surface);
+    color: var(--color-text-primary);
+    box-shadow: var(--ui-shadow-card);
+    cursor: pointer;
+    transition:
+            border-color var(--ui-transition),
+            background-color var(--ui-transition),
+            box-shadow var(--ui-transition),
+            transform var(--ui-transition-fast);
+}
+
+.ui-help-dialog__close:hover {
+    border-color: var(--ui-border-strong);
+    background: var(--ui-surface-2);
+    box-shadow: var(--ui-shadow-hover);
+}
+
+.ui-help-dialog__close:focus-visible {
+    outline: none;
+    box-shadow: var(--ui-ring);
+}
+
+.ui-help-dialog__close:active {
+    transform: translateY(1px);
+}
+
+.ui-help-dialog__close span {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ui-help-list.ui-help-list--grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-content: start;
+}
+
+.ui-help-list__item.ui-help-list__item--compact {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: 16px;
+    background: var(--ui-surface-2);
+}
+
+.ui-help-list__term {
+    color: var(--color-text-primary);
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+}
+
+.ui-help-list__description {
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+    .ui-help-backdrop {
+        padding: 12px;
+    }
+
+    .ui-help-dialog-shell {
+        width: 100%;
+        height: calc(100dvh - 24px);
+        max-height: calc(100dvh - 24px);
+    }
+
+    .ui-help-dialog.ui-help-dialog--compact {
+        border-radius: 20px;
+    }
+
+    .ui-help-dialog.ui-help-dialog--compact .ui-card__body {
+        padding-right: 22px;
+        padding-bottom: 22px;
+    }
+
+    .ui-help-list.ui-help-list--grid {
+        grid-template-columns: 1fr;
+    }
+}

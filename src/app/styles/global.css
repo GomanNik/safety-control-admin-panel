@@ -1,0 +1,72 @@
+/* =====================
+   src/app/styles/global.css
+   ===================== */
+
+/* =============================
+   App-level global styles
+   Тонкая надстройка над shared/foundation:
+   только app-specific визуальные правила.
+   ============================= */
+
+/* Нативные контролы / скроллбары под тему */
+html.theme-light {
+    color-scheme: light;
+}
+
+html.theme-dark {
+    color-scheme: dark;
+}
+
+/* App-level link branding */
+a {
+    color: color-mix(in srgb, var(--color-primary) 92%, var(--color-text-primary));
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Selection */
+::selection {
+    background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+    color: var(--color-text-primary);
+}
+
+/* App-only helper */
+.app-screen-center {
+    min-height: var(--viewport-height);
+    display: grid;
+    place-items: center;
+    padding:
+            max(var(--space-lg-effective), var(--safe-area-top))
+            max(var(--content-gutter), var(--safe-area-right))
+            max(var(--space-lg-effective), var(--safe-area-bottom))
+            max(var(--content-gutter), var(--safe-area-left));
+}
+
+/* Scrollbar */
+:root {
+    scrollbar-width: thin;
+    scrollbar-color:
+            color-mix(in srgb, var(--color-text-muted) 35%, transparent)
+            color-mix(in srgb, var(--color-bg-secondary) 55%, transparent);
+}
+
+::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+}
+
+::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-text-muted) 40%, transparent);
+    border: 2px solid color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+    border-radius: var(--radius-pill-effective);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
