@@ -1,0 +1,86 @@
+# ============================================================
+# OS / IDE
+# ============================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ============================================================
+# Env / secrets
+# ============================================================
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# ============================================================
+# Node / frontend / backend
+# ============================================================
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# ============================================================
+# Python / ML
+# ============================================================
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+.venv_*/
+venv/
+env/
+
+# ============================================================
+# Media / generated frontend demo assets
+# ============================================================
+public/videos/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# ============================================================
+# Vision runtime generated data
+# ============================================================
+vision/data/
+vision/datasets/
+vision/models/
+vision/runs/
+vision/_handoff/
+vision/__pycache__/
+vision/.venv/
+vision/.venv_*/
+vision/*.pt
+vision/*.onnx
+vision/*.engine
+vision/*.mp4
+vision/*.avi
+vision/*.mov
+vision/*.mkv
+
+# ============================================================
+# Local project scripts / dumps / analysis artifacts
+# ============================================================
+01_prepare_monorepo_git.ps1
+02_rebuild_clean_git.ps1
+_handoff/
+*.zip
+*.7z
+*.rar
+code_lines_*.csv
+*_code_dump.txt
+backend_unused_exports.txt
+usecase_code_dump.txt
+collect-project-code.ps1
