@@ -1,0 +1,10 @@
+/* =====================
+   shared/ui/styles/index.css
+   ===================== */
+
+@import './aliases.css';
+@import './atoms.css';
+@import './molecules.css';
+@import './layout.css';
+@import './workspace.css';
+@import './patterns.css';

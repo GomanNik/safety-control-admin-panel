@@ -1,0 +1,262 @@
+/* =====================
+   shared/foundation/index.css
+   ===================== */
+
+@import './tokens.css';
+@import './a11y.css';
+
+/* =============================
+   Reset / base document rules
+   Единственный глобальный reset/base слой приложения.
+   ============================= */
+
+html {
+    box-sizing: border-box;
+    min-height: 100%;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    scroll-behavior: smooth;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: inherit;
+    min-width: 0;
+}
+
+:where(html, body) {
+    margin: 0;
+    padding: 0;
+}
+
+:where(body, #root) {
+    min-height: var(--viewport-height);
+}
+
+/* =============================
+   Base document defaults
+   ============================= */
+
+body {
+    min-width: 320px;
+    font-family:
+            var(--font-family-main, Inter),
+            ui-sans-serif,
+            system-ui,
+            -apple-system,
+            "Segoe UI",
+            Roboto,
+            "Helvetica Neue",
+            Arial,
+            sans-serif;
+    font-size: var(--font-size-md, 15px);
+    line-height: var(--line-height-normal, 1.45);
+    font-weight: var(--font-weight-regular, 400);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--color-bg-primary, #ffffff);
+    color: var(--color-text-primary, #111827);
+}
+
+#root {
+    isolation: isolate;
+}
+
+/* =============================
+   Media / embedded content
+   ============================= */
+
+:where(img, picture, video, canvas, svg, iframe) {
+    display: block;
+    max-width: 100%;
+}
+
+:where(img, picture, video, canvas) {
+    height: auto;
+}
+
+svg {
+    flex: 0 0 auto;
+}
+
+/* =============================
+   Typography reset
+   ============================= */
+
+:where(
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    p,
+    blockquote,
+    figure,
+    figcaption,
+    dl,
+    dd,
+    pre
+) {
+    margin: 0;
+}
+
+:where(ul, ol) {
+    margin: 0;
+    padding: 0;
+}
+
+:where(ul[role='list'], ol[role='list']) {
+    list-style: none;
+}
+
+:where(code, kbd, samp, pre) {
+    font-family:
+            var(--font-family-mono, ui-monospace),
+            SFMono-Regular,
+            Menlo,
+            Monaco,
+            Consolas,
+            "Liberation Mono",
+            "Courier New",
+            monospace;
+}
+
+/* =============================
+   Base form normalize
+   ============================= */
+
+:where(button, input, select, textarea) {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+}
+
+button {
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+:where(button, [role='button']) {
+    cursor: pointer;
+}
+
+:where(button, input, select, textarea):disabled,
+:where([aria-disabled='true']) {
+    cursor: not-allowed;
+}
+
+textarea {
+    resize: vertical;
+}
+
+:where(input, textarea, select, button) {
+    -webkit-tap-highlight-color: transparent;
+}
+
+:where(input[type='search']) {
+    appearance: textfield;
+    -webkit-appearance: textfield;
+}
+
+:where(input[type='search']::-webkit-search-decoration) {
+    -webkit-appearance: none;
+}
+
+:where(
+    input[type='number']::-webkit-outer-spin-button,
+    input[type='number']::-webkit-inner-spin-button
+) {
+    margin: 0;
+    -webkit-appearance: none;
+}
+
+html.theme-light :where(input, select, textarea) {
+    color-scheme: light;
+}
+
+html.theme-dark :where(input, select, textarea) {
+    color-scheme: dark;
+}
+
+html.theme-light :where(select option, select optgroup) {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+}
+
+html.theme-light :where(select option:disabled) {
+    color: color-mix(in srgb, var(--color-text-primary) 42%, transparent);
+}
+
+html.theme-dark :where(select option, select optgroup) {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+}
+
+html.theme-dark :where(select option:disabled) {
+    color: color-mix(in srgb, var(--color-text-primary) 48%, transparent);
+}
+
+/* =============================
+   Base table rules
+   ============================= */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+}
+
+caption {
+    text-align: left;
+}
+
+/* =============================
+   Base links / anchors
+   База нейтральная; app-level визуальный стиль можно задавать выше по слою.
+   ============================= */
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+:where(a:not([class])) {
+    text-decoration-skip-ink: auto;
+}
+
+:target {
+    scroll-margin-block: var(--space-xl-effective, 28px);
+}
+
+/* =============================
+   Global focus defaults
+   Базовый, неагрессивный focus.
+   Компоненты shared/ui могут переопределять локально.
+   ============================= */
+
+:focus-visible {
+    outline: var(--border-width-strong, 2px) solid
+    var(--color-focus-ring-strong, rgba(47, 107, 255, 0.35));
+    outline-offset: var(--focus-outline-offset, 2px);
+}
+
+/* =============================
+   Text wrapping
+   ============================= */
+
+:where(p, li, figcaption) {
+    overflow-wrap: break-word;
+}
+
+:where(h1, h2, h3, h4, h5, h6) {
+    text-wrap: balance;
+}
+
+:where(p, li, blockquote) {
+    text-wrap: pretty;
+}

@@ -1,0 +1,63 @@
+/* =====================
+   src/widgets/settings/SettingsWorkspaceWidget/SettingsWorkspaceWidget.css
+   ===================== */
+
+.settings-workspace-widget {
+    padding-top: clamp(24px, 3vw, 32px);
+    padding-bottom: clamp(32px, 4vw, 48px);
+}
+
+.settings-workspace-widget__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs-effective);
+    margin-bottom: var(--space-lg-effective);
+}
+
+.settings-workspace-widget__title {
+    margin: 0;
+    color: var(--color-text-primary);
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: var(--line-height-tight);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: -0.02em;
+}
+
+.settings-workspace-widget__section-card {
+    width: 100%;
+}
+
+.settings-workspace-widget__section-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs-effective);
+}
+
+.settings-workspace-widget__section-title {
+    color: var(--color-text-primary);
+    font-size: var(--font-size-lg);
+    line-height: var(--line-height-tight);
+    font-weight: var(--font-weight-bold);
+}
+
+.settings-workspace-widget__section-content {
+    width: 100%;
+}
+
+.settings-workspace-widget__section-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-sm-effective);
+}
+
+@media (max-width: 640px) {
+    .settings-workspace-widget__section-footer {
+        width: 100%;
+        flex-direction: column;
+    }
+
+    .settings-workspace-widget__section-footer > * {
+        width: 100%;
+    }
+}

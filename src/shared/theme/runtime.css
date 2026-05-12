@@ -1,0 +1,110 @@
+/* =====================
+   src/shared/theme/runtime.css
+   ===================== */
+
+:root {
+    /* ---------- Colors ---------- */
+    --color-primary: #1f5eff;
+    --color-primary-soft: rgba(31, 94, 255, 0.12);
+    --color-primary-strong: #1849c7;
+
+    --color-info: #1f5eff;
+    --color-muted: #64748b;
+
+    --color-danger: #d14343;
+    --color-warning: #c9830f;
+    --color-success: #238a5a;
+
+    --color-text-primary: #0f172a;
+    --color-text-secondary: #475569;
+    --color-text-muted: #64748b;
+
+    --color-bg-primary: #e9edf3;
+    --color-bg-secondary: #e2e8f0;
+    --color-bg-elevated: #ffffff;
+
+    --color-border-subtle: #c8d1de;
+
+    /* ---------- Semantic aliases ---------- */
+    --color-border: var(--color-border-subtle);
+    --color-border-strong: #b9c4d4;
+
+    --color-focus-ring: rgba(31, 94, 255, 0.18);
+    --color-focus-ring-strong: rgba(31, 94, 255, 0.28);
+
+    /* ---------- Typography ---------- */
+    --font-family-main:
+            Inter,
+            ui-sans-serif,
+            system-ui,
+            -apple-system,
+            "Segoe UI",
+            Roboto,
+            "Helvetica Neue",
+            Arial,
+            "Noto Sans",
+            "Apple Color Emoji",
+            "Segoe UI Emoji",
+            sans-serif;
+
+    --font-family-mono:
+            ui-monospace,
+            SFMono-Regular,
+            Menlo,
+            Monaco,
+            Consolas,
+            "Liberation Mono",
+            "Courier New",
+            monospace;
+
+    --font-size-xs: 12px;
+    --font-size-sm: 14px;
+    --font-size-md: 16px;
+    --font-size-lg: 19px;
+    --font-size-xl: 28px;
+
+    --line-height-tight: 1.2;
+    --line-height-normal: 1.45;
+    --line-height-relaxed: 1.58;
+
+    --font-weight-regular: 400;
+    --font-weight-medium: 500;
+    --font-weight-bold: 700;
+
+    /* ---------- Spacing ---------- */
+    --space-none: 0px;
+    --space-xs: 8px;
+    --space-sm: 12px;
+    --space-md: 16px;
+    --space-lg: 20px;
+    --space-xl: 28px;
+
+    /* ---------- Radius ---------- */
+    --radius-none: 0px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-pill: 999px;
+    --radius-full: 9999px;
+
+    /* ---------- Shadows ---------- */
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --shadow-sm: 0 8px 20px rgba(15, 23, 42, 0.08);
+    --shadow-md: 0 18px 42px rgba(15, 23, 42, 0.12);
+    --shadow-lg: 0 28px 72px rgba(15, 23, 42, 0.18);
+
+    /* ---------- Density-derived theme aliases ---------- */
+    --space-none-effective: calc(var(--space-none) * var(--density-space-scale, 1));
+    --space-xs-effective: calc(var(--space-xs) * var(--density-space-scale, 1));
+    --space-sm-effective: calc(var(--space-sm) * var(--density-space-scale, 1));
+    --space-md-effective: calc(var(--space-md) * var(--density-space-scale, 1));
+    --space-lg-effective: calc(var(--space-lg) * var(--density-space-scale, 1));
+    --space-xl-effective: calc(var(--space-xl) * var(--density-space-scale, 1));
+
+    --radius-none-effective: calc(var(--radius-none) * var(--density-radius-scale, 1));
+    --radius-sm-effective: calc(var(--radius-sm) * var(--density-radius-scale, 1));
+    --radius-md-effective: calc(var(--radius-md) * var(--density-radius-scale, 1));
+    --radius-lg-effective: calc(var(--radius-lg) * var(--density-radius-scale, 1));
+    --radius-pill-effective: calc(var(--radius-pill) * var(--density-radius-scale, 1));
+    --radius-full-effective: calc(var(--radius-full) * var(--density-radius-scale, 1));
+}

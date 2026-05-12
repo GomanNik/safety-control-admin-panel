@@ -1,0 +1,334 @@
+/* =====================
+   src/widgets/errors/errors.css
+   ===================== */
+
+/* =============================
+   Error widgets
+   Widget-level стили только для уникальной композиции ошибок.
+   Повторяемые surface / typography / spacing уже приходят из shared.
+   ============================= */
+
+/* =============================
+   Shared error-widget primitives
+   ============================= */
+
+.app-error-boundary-widget,
+.error-404-widget {
+    min-height: var(--viewport-height);
+    display: grid;
+    place-items: center;
+    padding:
+            max(var(--space-xl-effective), var(--safe-area-top))
+            max(var(--ui-page-pad-x), var(--safe-area-right))
+            max(var(--space-xl-effective), var(--safe-area-bottom))
+            max(var(--ui-page-pad-x), var(--safe-area-left));
+}
+
+.app-error-boundary-widget__shell,
+.http-error-widget__shell,
+.error-404-widget__shell {
+    width: 100%;
+    min-width: 0;
+    margin-inline: auto;
+}
+
+.app-error-boundary-widget__card,
+.http-error-widget__card,
+.error-404-widget__card {
+    position: relative;
+    border-color: color-mix(in srgb, var(--ui-border) 82%, transparent);
+}
+
+.app-error-boundary-widget__title,
+.http-error-widget__title,
+.error-404-widget__title {
+    margin: 0;
+    color: var(--color-text-primary);
+}
+
+.app-error-boundary-widget__subtitle,
+.http-error-widget__subtitle,
+.error-404-widget__subtitle {
+    margin: 0;
+    color: var(--ui-text-subtle);
+    line-height: var(--line-height-relaxed);
+}
+
+.app-error-boundary-widget__actions,
+.http-error-widget__actions,
+.error-404-widget__actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm-effective);
+    margin-top: var(--space-sm-effective);
+}
+
+/* =============================
+   App error boundary widget
+   ============================= */
+
+.app-error-boundary-widget {
+    background:
+            radial-gradient(
+                    circle at top center,
+                    color-mix(in srgb, var(--color-danger) 8%, transparent),
+                    transparent 52%
+            ),
+            linear-gradient(
+                    180deg,
+                    color-mix(in srgb, var(--color-bg-secondary) 38%, transparent),
+                    transparent 42%
+            );
+}
+
+.app-error-boundary-widget__shell {
+    max-width: 760px;
+}
+
+.app-error-boundary-widget__hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm-effective);
+    text-align: center;
+}
+
+.app-error-boundary-widget__sign {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border: var(--border-width-hairline) solid var(--ui-border-danger);
+    border-radius: var(--radius-full-effective);
+    background: var(--ui-surface-danger);
+    color: var(--ui-text-danger);
+    font-size: 36px;
+    font-weight: var(--font-weight-bold);
+    line-height: 1;
+    user-select: none;
+}
+
+.app-error-boundary-widget__title {
+    max-width: 18ch;
+    text-align: center;
+}
+
+.app-error-boundary-widget__subtitle {
+    max-width: 56ch;
+    text-align: center;
+}
+
+.app-error-boundary-widget__details {
+    margin-top: var(--space-md-effective);
+    padding-top: var(--space-md-effective);
+    border-top: var(--border-width-hairline) solid
+    color-mix(in srgb, var(--ui-border) 72%, transparent);
+}
+
+.app-error-boundary-widget__summary {
+    color: var(--ui-text-subtle);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+}
+
+.app-error-boundary-widget__summary:focus-visible {
+    outline-offset: var(--focus-outline-offset);
+}
+
+.app-error-boundary-widget__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm-effective);
+    margin-top: var(--space-sm-effective);
+}
+
+.app-error-boundary-widget__stack {
+    margin: 0;
+    max-height: 240px;
+    overflow: auto;
+    padding: var(--space-sm-effective);
+    border-radius: var(--radius-md-effective);
+    background: var(--ui-surface-muted);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
+}
+
+/* =============================
+   HTTP error widget
+   ============================= */
+
+.http-error-widget {
+    padding:
+            var(--space-xl-effective)
+            max(var(--ui-page-pad-x), var(--safe-area-right));
+    padding-left: max(var(--ui-page-pad-x), var(--safe-area-left));
+}
+
+.http-error-widget__shell {
+    max-width: 760px;
+}
+
+.http-error-widget__hero {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs-effective);
+    text-align: center;
+}
+
+.http-error-widget__title {
+    text-align: center;
+}
+
+.http-error-widget__subtitle {
+    max-width: 56ch;
+    margin-inline: auto;
+    text-align: center;
+}
+
+.http-error-widget__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm-effective);
+    margin-top: var(--space-xs-effective);
+}
+
+.http-error-widget__details-title {
+    color: var(--color-text-primary);
+}
+
+.http-error-widget__details-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs-effective);
+    margin: var(--space-sm-effective) 0 0;
+    padding: var(--space-sm-effective);
+    border-radius: var(--radius-md-effective);
+    background: var(--ui-surface-2);
+}
+
+.http-error-widget__details-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) 1fr;
+    gap: var(--space-sm-effective);
+    align-items: start;
+}
+
+.http-error-widget__details-key {
+    margin: 0;
+    color: var(--ui-text-subtle);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    font-weight: var(--font-weight-medium);
+}
+
+.http-error-widget__details-value {
+    margin: 0;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    overflow-wrap: anywhere;
+}
+
+/* =============================
+   404 page widget
+   ============================= */
+
+.error-404-widget {
+    background:
+            radial-gradient(
+                    circle at top center,
+                    color-mix(in srgb, var(--color-primary-soft) 18%, transparent),
+                    transparent 52%
+            ),
+            linear-gradient(
+                    180deg,
+                    color-mix(in srgb, var(--color-bg-secondary) 38%, transparent),
+                    transparent 42%
+            );
+}
+
+.error-404-widget__shell {
+    max-width: 720px;
+}
+
+.error-404-widget__hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm-effective);
+    text-align: center;
+}
+
+.error-404-widget__code {
+    color: color-mix(
+            in srgb,
+            var(--color-text-primary) 88%,
+            var(--color-bg-primary) 12%
+    );
+    font-size: clamp(68px, 16.5vw, 112px);
+    font-weight: var(--font-weight-bold);
+    line-height: 0.9;
+    letter-spacing: -0.05em;
+    text-shadow:
+            0 8px 24px color-mix(
+                    in srgb,
+                    var(--color-text-primary) 10%,
+                    transparent
+            );
+    user-select: none;
+}
+
+.error-404-widget__title {
+    max-width: 18ch;
+    text-align: center;
+}
+
+.error-404-widget__subtitle {
+    max-width: 52ch;
+    text-align: center;
+}
+
+/* =============================
+   Responsive
+   ============================= */
+
+@media (max-width: 640px) {
+    .app-error-boundary-widget,
+    .error-404-widget,
+    .http-error-widget {
+        padding-top: var(--space-lg-effective);
+        padding-bottom: var(--space-lg-effective);
+        padding-left: max(var(--space-md-effective), var(--safe-area-left));
+        padding-right: max(var(--space-md-effective), var(--safe-area-right));
+    }
+
+    .http-error-widget__toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .http-error-widget__details-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+
+    .app-error-boundary-widget__actions,
+    .http-error-widget__actions,
+    .error-404-widget__actions {
+        width: 100%;
+        flex-direction: column;
+    }
+
+    .app-error-boundary-widget__actions > *,
+    .http-error-widget__actions > *,
+    .error-404-widget__actions > * {
+        width: 100%;
+    }
+}
