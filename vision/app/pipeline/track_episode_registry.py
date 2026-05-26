@@ -32,6 +32,13 @@ class _CandidateStabilityState:
     last_frame_index: int = -1
 
 
+@dataclass(slots=True)
+class _EpisodeRebindCandidate:
+    episode_id: str
+    score: float
+    reason_codes: list[str]
+
+
 class TrackEpisodeRegistry:
     def __init__(self, settings: Settings, *, camera_id: str) -> None:
         self._settings = settings
@@ -43,6 +50,7 @@ class TrackEpisodeRegistry:
         self._candidate_hits_by_track_id: dict[int, int] = {}
         self._candidate_stability_by_track_id: dict[int, _CandidateStabilityState] = {}
         self._rejected_hits_by_track_id: dict[int, int] = {}
+        self._last_visible_track_ids: set[int] = set()
 
     def reset(self) -> None:
         self._session_id = self._new_session_id()
@@ -52,6 +60,7 @@ class TrackEpisodeRegistry:
         self._candidate_hits_by_track_id.clear()
         self._candidate_stability_by_track_id.clear()
         self._rejected_hits_by_track_id.clear()
+        self._last_visible_track_ids.clear()
 
     def update_frame(
         self,
@@ -96,29 +105,46 @@ class TrackEpisodeRegistry:
 
             episode_id = self._active_episode_by_track_id.get(track_id)
             is_new = False
+            is_rebound = False
+            assignment_reason_codes = ["track_episode_active"]
 
             if episode_id is None or episode_id not in self._episodes_by_id:
                 candidate_count += 1
                 self._candidate_hits_by_track_id[track_id] = self._candidate_hits_by_track_id.get(track_id, 0) + 1
 
-                promotable, reason_codes = self._can_promote_new_episode(track=track, quality=quality)
-                if not promotable:
-                    if self._is_partial_or_fragment_quality(quality):
-                        partial_rejected_count += 1
-                    rejected_count += 1
-                    self._rejected_hits_by_track_id[track_id] = self._rejected_hits_by_track_id.get(track_id, 0) + 1
-                    assignments[track_id] = self._rejected_assignment(
+                rebind_candidate = self._find_rebind_candidate(
+                    track=track,
+                    quality=quality,
+                    observed_at=observed_at,
+                    visible_track_ids=visible_ids,
+                )
+                if rebind_candidate is not None:
+                    episode_id = self._rebind_track_to_episode(
                         track=track,
-                        reason="candidate_track_not_promoted",
-                        reason_codes=reason_codes,
-                        partial=self._is_partial_or_fragment_quality(quality),
+                        episode_id=rebind_candidate.episode_id,
+                        visible_track_ids=visible_ids,
                     )
-                    continue
+                    is_rebound = True
+                    assignment_reason_codes = ["track_episode_active", *rebind_candidate.reason_codes]
+                else:
+                    promotable, reason_codes = self._can_promote_new_episode(track=track, quality=quality)
+                    if not promotable:
+                        if self._is_partial_or_fragment_quality(quality):
+                            partial_rejected_count += 1
+                        rejected_count += 1
+                        self._rejected_hits_by_track_id[track_id] = self._rejected_hits_by_track_id.get(track_id, 0) + 1
+                        assignments[track_id] = self._rejected_assignment(
+                            track=track,
+                            reason="candidate_track_not_promoted",
+                            reason_codes=reason_codes,
+                            partial=self._is_partial_or_fragment_quality(quality),
+                        )
+                        continue
 
-                episode_id = self._create_episode(track=track, observed_at=observed_at)
-                is_new = True
-                created_count += 1
-                promoted_count += 1
+                    episode_id = self._create_episode(track=track, observed_at=observed_at)
+                    is_new = True
+                    created_count += 1
+                    promoted_count += 1
 
             record = self._episodes_by_id[episode_id]
             self._update_episode_record(record=record, track=track, quality=quality, observed_at=observed_at)
@@ -135,8 +161,8 @@ class TrackEpisodeRegistry:
                 status=record.status,
                 confidence=self._clip01(getattr(track, "tracking_confidence", track.confidence)),
                 stable_hits=max(0, int(getattr(track, "track_hits", 0))),
-                reason="new_track_episode" if is_new else "existing_track_episode",
-                reason_codes=["track_episode_active"],
+                reason="new_track_episode" if is_new else ("rebound_existing_track_episode" if is_rebound else "existing_track_episode"),
+                reason_codes=self._unique(assignment_reason_codes),
                 is_confirmed=bool(getattr(track, "is_confirmed_track", False)),
                 is_new_episode=is_new,
             )
@@ -150,6 +176,7 @@ class TrackEpisodeRegistry:
             for episode_id, record in self._episodes_by_id.items()
             if record.status == TrackEpisodeStatus.ACTIVE
         }
+        self._last_visible_track_ids = set(visible_ids)
 
         return TrackEpisodeFrameResult(
             assignments_by_track_id=assignments,
@@ -294,6 +321,10 @@ class TrackEpisodeRegistry:
         record = self._episodes_by_id.get(episode_id)
         if record is None:
             return
+        if any(mapped_episode_id == episode_id for mapped_track_id, mapped_episode_id in self._active_episode_by_track_id.items() if mapped_track_id != track_id):
+            record.last_seen_at = observed_at
+            record.reason_codes = self._unique([*record.reason_codes, reason, "tracker_source_track_removed_after_rebind"])
+            return
         record.status = TrackEpisodeStatus.ENDED
         record.last_seen_at = observed_at
         record.reason_codes = self._unique([*record.reason_codes, reason, "track_episode_ended"])
@@ -321,9 +352,7 @@ class TrackEpisodeRegistry:
 
         per_frame_ok = bool(
             bool(getattr(quality, "is_usable_for_tracking", False))
-            and bool(getattr(quality, "head_visible", False))
             and not self._is_partial_or_fragment_quality(quality)
-            and not bool(getattr(quality, "is_interaction_risk", False))
         )
         temporal_stable = self._update_candidate_stability(track=track, stable=per_frame_ok)
 
@@ -356,13 +385,14 @@ class TrackEpisodeRegistry:
         if self._is_partial_or_fragment_quality(quality):
             reasons.append("candidate_partial_fragment_rejected")
 
-        if bool(getattr(self._settings, "track_episode_require_head_for_new", True)):
+        if bool(getattr(self._settings, "track_episode_require_head_for_new", False)):
             if not bool(getattr(quality, "head_visible", False)):
                 reasons.append("candidate_head_not_visible")
-            if bool(getattr(quality, "is_interaction_risk", False)):
-                reasons.append("candidate_interaction_risk")
-            if bool(getattr(quality, "is_truncated", False)) and not fast_promotable:
-                reasons.append("candidate_border_truncated")
+
+        # Episode creation is about a stable anonymous person in the camera view.
+        # Headwear-specific issues such as a cropped/occluded head must not block
+        # episode creation because the HeadDetector + HeadQualityGate now decide
+        # whether the classifier may run.
 
         if not reasons:
             return True, ["candidate_promoted_to_track_episode_fast" if fast_promotable else "candidate_promoted_to_track_episode"]
@@ -405,6 +435,109 @@ class TrackEpisodeRegistry:
         state.last_frame_index = int(track.frame_index)
         return is_temporally_stable
 
+    def _find_rebind_candidate(
+        self,
+        *,
+        track: TrackedPersonObservation,
+        quality: QualityAssessment | None,
+        observed_at: datetime,
+        visible_track_ids: set[int],
+    ) -> _EpisodeRebindCandidate | None:
+        if not bool(getattr(self._settings, "track_episode_rebind_enabled", True)):
+            return None
+        if quality is not None and not bool(getattr(quality, "is_usable_for_tracking", False)):
+            return None
+        if self._is_partial_or_fragment_quality(quality):
+            return None
+
+        max_gap = max(0, int(getattr(self._settings, "track_episode_rebind_max_frame_gap", 12)))
+        min_score = self._clip01(getattr(self._settings, "track_episode_rebind_min_score", 0.58))
+        best: _EpisodeRebindCandidate | None = None
+
+        for episode_id, record in self._episodes_by_id.items():
+            if record.status == TrackEpisodeStatus.ENDED:
+                continue
+            if not self._episode_can_accept_new_track(episode_id=episode_id, new_track_id=int(track.track_id), visible_track_ids=visible_track_ids):
+                continue
+            if record.last_bbox is None or not record.last_bbox.is_valid:
+                continue
+
+            gap_frames = max(0, int(track.frame_index) - int(record.last_frame_index))
+            if gap_frames > max_gap:
+                continue
+
+            score, reason_codes = self._score_episode_rebind(track=track, record=record, gap_frames=gap_frames, max_gap=max_gap)
+            if score < min_score:
+                continue
+            candidate = _EpisodeRebindCandidate(episode_id=episode_id, score=score, reason_codes=reason_codes)
+            if best is None or candidate.score > best.score:
+                best = candidate
+        return best
+
+    def _episode_can_accept_new_track(self, *, episode_id: str, new_track_id: int, visible_track_ids: set[int]) -> bool:
+        if not bool(getattr(self._settings, "track_episode_prevent_covisible_rebind", True)):
+            return True
+        for mapped_track_id, mapped_episode_id in self._active_episode_by_track_id.items():
+            if mapped_episode_id != episode_id or int(mapped_track_id) == int(new_track_id):
+                continue
+            if int(mapped_track_id) in visible_track_ids:
+                return False
+        return True
+
+    def _score_episode_rebind(
+        self,
+        *,
+        track: TrackedPersonObservation,
+        record: TrackEpisodeRecord,
+        gap_frames: int,
+        max_gap: int,
+    ) -> tuple[float, list[str]]:
+        assert record.last_bbox is not None
+        distance = self._bbox_center_distance(record.last_bbox, track.bbox)
+        max_dimension = max(record.last_bbox.width, record.last_bbox.height, track.bbox.width, track.bbox.height, 1)
+        center_shift_ratio = distance / float(max_dimension)
+        max_center_shift = self._clip01(getattr(self._settings, "track_episode_rebind_max_center_shift_ratio", 0.70))
+        if center_shift_ratio > max_center_shift:
+            return 0.0, ["track_episode_rebind_center_shift_too_large"]
+
+        previous_area = max(1, int(record.last_bbox.area))
+        current_area = max(1, int(track.bbox.area))
+        size_similarity = min(previous_area, current_area) / float(max(previous_area, current_area))
+        min_size_similarity = self._clip01(getattr(self._settings, "track_episode_rebind_min_size_similarity", 0.35))
+        if size_similarity < min_size_similarity:
+            return 0.0, ["track_episode_rebind_size_mismatch"]
+
+        spatial_score = max(0.0, 1.0 - (center_shift_ratio / max(max_center_shift, 1e-6)))
+        gap_score = 1.0 if max_gap <= 0 else max(0.0, 1.0 - (float(gap_frames) / float(max(max_gap, 1))))
+        score = self._clip01((0.55 * spatial_score) + (0.30 * size_similarity) + (0.15 * gap_score))
+        return score, [
+            "track_episode_rebound_after_tracker_id_change",
+            f"rebind_score={score:.3f}",
+            f"rebind_gap_frames={gap_frames}",
+        ]
+
+    def _rebind_track_to_episode(
+        self,
+        *,
+        track: TrackedPersonObservation,
+        episode_id: str,
+        visible_track_ids: set[int],
+    ) -> str:
+        new_track_id = int(track.track_id)
+        stale_track_ids = [
+            int(mapped_track_id)
+            for mapped_track_id, mapped_episode_id in self._active_episode_by_track_id.items()
+            if mapped_episode_id == episode_id and int(mapped_track_id) != new_track_id and int(mapped_track_id) not in visible_track_ids
+        ]
+        for stale_track_id in stale_track_ids:
+            self._active_episode_by_track_id.pop(stale_track_id, None)
+        self._active_episode_by_track_id[new_track_id] = episode_id
+        record = self._episodes_by_id.get(episode_id)
+        if record is not None:
+            record.status = TrackEpisodeStatus.ACTIVE
+            record.reason_codes = self._unique([*record.reason_codes, "track_episode_rebound_after_tracker_id_change"])
+        return episode_id
+
     def _promotion_reject_reason(
         self,
         *,
@@ -442,7 +575,16 @@ class TrackEpisodeRegistry:
             + list(getattr(quality, "reason_codes", []) or [])
             if str(item).strip()
         }
+        headwear_only_reasons = {
+            "head_cropped_by_frame_border",
+            "person_box_rejected_edge_fragment_for_headwear",
+            "person_box_rejected_headwear_zone_occluded",
+            "candidate_head_not_visible",
+            "candidate_border_truncated",
+        }
         for reason in configured:
+            if reason in headwear_only_reasons:
+                continue
             if reason in reason_codes:
                 return reason
         return None
@@ -461,12 +603,9 @@ class TrackEpisodeRegistry:
         return bool(
             float(getattr(quality, "quality_score", 0.0)) >= fast_quality
             and bool(getattr(quality, "is_usable_for_tracking", False))
-            and bool(getattr(quality, "head_visible", False))
             and not bool(getattr(quality, "is_partial_limb_only", False))
             and not bool(getattr(quality, "is_lower_body_only", False))
-            and not bool(getattr(quality, "is_bent_over", False))
-            and not bool(getattr(quality, "is_interaction_risk", False))
-            and visibility in {"head_visible", "full_body_visible", "upper_body_visible", "head_partially_visible"}
+            and visibility in {"head_visible", "full_body_visible", "upper_body_visible", "head_partially_visible", "not_evaluable", "unknown"}
         )
 
     def _is_partial_or_fragment_quality(self, quality: QualityAssessment | None) -> bool:
@@ -476,10 +615,8 @@ class TrackEpisodeRegistry:
         return bool(
             getattr(quality, "is_partial_limb_only", False)
             or getattr(quality, "is_lower_body_only", False)
-            or getattr(quality, "is_bent_over", False)
             or "border_fragment" in codes
             or "limb_only_or_tiny_fragment" in codes
-            or "head_cropped_by_frame_border" in codes
         )
 
     def _rejected_assignment(

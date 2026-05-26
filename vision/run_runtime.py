@@ -80,17 +80,63 @@ def start_export(
     output_path: str | None,
     max_seconds: float | None,
 ) -> dict[str, Any]:
+    return _post_runtime_job(
+        session=session,
+        base_url=base_url,
+        endpoint="export-video",
+        source_url=source_url,
+        output_value=output_path,
+        output_param_name="output_path",
+        max_seconds=max_seconds,
+        start_seconds=None,
+    )
+
+
+def start_person_crop_collection(
+    *,
+    session: requests.Session,
+    base_url: str,
+    source_url: str | None,
+    output_dir: str | None,
+    max_seconds: float | None,
+    start_seconds: float | None,
+) -> dict[str, Any]:
+    return _post_runtime_job(
+        session=session,
+        base_url=base_url,
+        endpoint="collect-person-crops",
+        source_url=source_url,
+        output_value=output_dir,
+        output_param_name="output_dir",
+        max_seconds=max_seconds,
+        start_seconds=start_seconds,
+    )
+
+
+def _post_runtime_job(
+    *,
+    session: requests.Session,
+    base_url: str,
+    endpoint: str,
+    source_url: str | None,
+    output_value: str | None,
+    output_param_name: str,
+    max_seconds: float | None,
+    start_seconds: float | None = None,
+) -> dict[str, Any]:
     params: dict[str, Any] = {}
 
     if source_url:
         params["source_url"] = source_url
-    if output_path:
-        params["output_path"] = output_path
+    if output_value:
+        params[output_param_name] = output_value
     if max_seconds is not None:
         params["max_seconds"] = max_seconds
+    if start_seconds is not None:
+        params["start_seconds"] = start_seconds
 
     response = session.post(
-        f"{base_url}/runtime/export-video",
+        f"{base_url}/runtime/{endpoint}",
         params=params,
         timeout=_request_timeout(),
     )
@@ -358,7 +404,10 @@ def main() -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--source-url", default=None)
     parser.add_argument("--output-path", default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--collect-person-crops", action="store_true")
     parser.add_argument("--max-seconds", type=float, default=None)
+    parser.add_argument("--start-seconds", type=float, default=None)
     parser.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_INTERVAL_SEC)
     parser.add_argument("--print-metrics-summary", action="store_true")
     parser.add_argument("--metrics-root", default="./data/metrics")
@@ -369,13 +418,23 @@ def main() -> None:
 
     with requests.Session() as session:
         try:
-            start_response = start_export(
-                session=session,
-                base_url=base_url,
-                source_url=args.source_url,
-                output_path=args.output_path,
-                max_seconds=args.max_seconds,
-            )
+            if args.collect_person_crops:
+                start_response = start_person_crop_collection(
+                    session=session,
+                    base_url=base_url,
+                    source_url=args.source_url,
+                    output_dir=args.output_dir or args.output_path,
+                    max_seconds=args.max_seconds,
+                    start_seconds=args.start_seconds,
+                )
+            else:
+                start_response = start_export(
+                    session=session,
+                    base_url=base_url,
+                    source_url=args.source_url,
+                    output_path=args.output_path,
+                    max_seconds=args.max_seconds,
+                )
 
             _print_start_response(start_response)
 

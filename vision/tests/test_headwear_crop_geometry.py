@@ -34,10 +34,10 @@ def test_headwear_crop_geometry_matches_policy_constants() -> None:
     )
 
     assert crop is not None
-    assert crop.as_xyxy() == (68, 50, 332, 260)
-    assert crop.width == 264
-    assert crop.height == 210
-    assert HEADWEAR_CROP_RECIPE_VERSION == "head_top_042_expandx_016_v1"
+    assert crop.as_xyxy() == (142, 50, 258, 200)
+    assert crop.width == 116
+    assert crop.height == 150
+    assert HEADWEAR_CROP_RECIPE_VERSION == "head_top_030_centerw_058_v3"
 
 
 def test_headwear_crop_geometry_clamps_to_frame() -> None:
@@ -51,7 +51,7 @@ def test_headwear_crop_geometry_clamps_to_frame() -> None:
     )
 
     assert crop is not None
-    assert crop.as_xyxy() == (0, 0, 120, 84)
+    assert crop.as_xyxy() == (26, 0, 84, 30)
 
 
 def test_headwear_crop_geometry_rejects_tiny_crop() -> None:

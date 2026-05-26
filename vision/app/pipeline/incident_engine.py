@@ -21,6 +21,7 @@ from uuid import uuid4
 from app.config import Settings
 from app.models.schemas import ComplianceSignal, HeadwearAssessment, IncidentCase, IncidentState
 from app.pipeline.human_observation import TrackObservation
+from app.pipeline.headwear_observation import HeadwearObservation, TrackEpisodeBinding, build_headwear_observation_from_assessment
 
 
 class IncidentSubjectType(str, Enum):
@@ -207,6 +208,122 @@ class IncidentEngine:
         self._last_violation_observed_at_by_case.clear()
         self._date_key = current_key
         return changed
+
+    def process_headwear_observation(
+        self,
+        *,
+        headwear_observation: HeadwearObservation,
+        track_binding: TrackEpisodeBinding,
+        frame_path: str | None = None,
+    ) -> IncidentUpdateResult:
+        track_episode_id = str(track_binding.episode_id or "").strip()
+        if not track_episode_id:
+            return IncidentUpdateResult(
+                subject_key=None,
+                subject_type=IncidentSubjectType.UNKNOWN,
+                case=None,
+                changed_cases=[],
+                opened=False,
+                buffered=False,
+                reason_codes=["track_episode_missing"],
+            )
+
+        observed_at = track_binding.observed_at or datetime.utcnow()
+        self.reset_if_needed(observed_at)
+
+        non_actionable_codes = {
+            "head_not_detected",
+            "head_occluded",
+            "head_cropped_by_border",
+            "head_unusable",
+            "ambiguous_head",
+            "unknown",
+            "not_visible",
+            "not_evaluable",
+            "classifier_not_scheduled_without_actionable_head",
+            "classifier_not_scheduled_without_head",
+        }
+        codes = [*list(track_binding.reason_codes), *list(headwear_observation.reason_codes)]
+        has_blocking_code = any(str(code).strip().lower() in non_actionable_codes for code in codes)
+        usable = bool(
+            track_binding.is_actionable
+            and headwear_observation.is_actionable
+            and headwear_observation.classifier_input_crop_type == "head"
+            and headwear_observation.signal != ComplianceSignal.UNKNOWN
+            and not has_blocking_code
+        )
+        signal_value = headwear_observation.signal if usable else ComplianceSignal.UNKNOWN
+
+        signal = _Observation(
+            observed_at=observed_at,
+            signal=signal_value,
+            confidence=self._clip01(headwear_observation.confidence or 0.0),
+            quality_score=self._clip01((headwear_observation.quality or {}).get("quality_score", 0.0)),
+            frame_path=frame_path,
+            camera_id=track_binding.camera_id,
+            track_episode_id=track_episode_id,
+            source_track_id=_safe_int_or_none(track_binding.track_id),
+            visibility_state=str((headwear_observation.quality or {}).get("head_status", "unknown")),
+            usable_for_incident=usable,
+            reason_codes=tuple(self._unique_reason_codes(codes + [headwear_observation.status])),
+        )
+
+        window = self._signal_windows.setdefault(track_episode_id, _SignalWindow())
+        window.append(signal)
+        window.trim(reference_time=observed_at, window_seconds=self._window_seconds(), max_count=self._window_size())
+        self._last_activity_by_episode[track_episode_id] = observed_at
+        stats = window.stats()
+
+        changed_before = set(self._changed_case_ids)
+        case = self._get_active_case(track_episode_id)
+        opened = False
+        buffered = True
+        reason_codes = ["headwear_observation_buffered_by_track_episode"]
+
+        if case is None and signal.signal == ComplianceSignal.VIOLATION and usable:
+            case = self._create_case(
+                track_episode_id=track_episode_id,
+                source_track_id=_safe_int_or_none(track_binding.track_id),
+                camera_id=track_binding.camera_id,
+                opened_at=observed_at,
+                reason_codes=["candidate_created_by_actionable_headwear_violation"],
+            )
+            reason_codes.append("candidate_case_created")
+
+        if case is not None:
+            case.violation_duration_sec = max(case.violation_duration_sec, stats.violation_duration_sec)
+            case.max_confidence = max(case.max_confidence, stats.best_violation_confidence)
+            case.reason_codes = self._unique_reason_codes(list(case.reason_codes) + list(signal.reason_codes))
+            self._last_violation_observed_at_by_case[case.case_id] = stats.last_violation_at
+            if signal.signal == ComplianceSignal.VIOLATION and usable:
+                case.last_confirmed_at = max(case.last_confirmed_at, observed_at)
+            if case.state == IncidentState.CANDIDATE and self._should_open(stats):
+                case.state = IncidentState.OPEN
+                opened = True
+                buffered = False
+                reason_codes.append("incident_opened_after_stable_actionable_headwear_violation")
+                self._mark_case_changed(case.case_id)
+            elif case.state == IncidentState.OPEN and self._should_cooldown(stats):
+                case.state = IncidentState.COOLDOWN
+                reason_codes.append("incident_cooldown_after_compliant_signals")
+                self._mark_case_changed(case.case_id)
+            elif case.state == IncidentState.COOLDOWN and self._should_reopen(stats):
+                case.state = IncidentState.OPEN
+                reason_codes.append("incident_reopened_after_new_violation")
+                self._mark_case_changed(case.case_id)
+            elif case.state == IncidentState.OPEN and signal.signal == ComplianceSignal.VIOLATION and usable:
+                self._mark_case_changed(case.case_id)
+
+        changed_cases = [self._cases_by_id[item] for item in self._changed_case_ids - changed_before if item in self._cases_by_id]
+        return IncidentUpdateResult(
+            subject_key=track_episode_id,
+            subject_type=IncidentSubjectType.TRACK_EPISODE,
+            case=case,
+            changed_cases=changed_cases,
+            opened=opened,
+            buffered=buffered,
+            reason_codes=self._unique_reason_codes(reason_codes),
+        )
 
     def process_headwear_assessment(
         self,
@@ -557,3 +674,12 @@ class IncidentEngine:
             seen.add(value)
             result.append(value)
         return result
+
+
+def _safe_int_or_none(value: object) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None

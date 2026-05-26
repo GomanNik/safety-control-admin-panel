@@ -4,9 +4,11 @@
 # - Filters raw tracker person boxes before they enter the headwear runtime chain.
 # - Separates raw detector/tracker boxes from workable person boxes.
 # - Keeps rejected boxes available for overlay/debug logic.
-# - Rejects fragments that are not suitable for headwear analysis:
-#   hands, aprons, lower body, exit slices, edge fragments, strong peer overlap,
-#   unreliable headwear zones and internal occluder fragments.
+# - Separates person-track eligibility from headwear/classifier eligibility.
+# - Keeps stable person tracks even when the headwear zone is cropped/unknown;
+#   real head visibility is decided later by the HeadDetector chain.
+# - Rejects structural false-person fragments such as hands, limbs, apron-like
+#   slices, duplicate fragments and impossible geometry.
 # - Internal occluder zones are not background masks. They are camera-specific
 #   foreground/structure hints used only together with fragment-like geometry.
 # - Does not perform ReID, identity matching or incident logic.
@@ -186,7 +188,7 @@ class PersonBoxGate:
             decisions[int(track.track_id)] = decision
 
             updated_track = self._with_reasons(track, decision.reason_codes)
-            if decision.accepted_for_headwear:
+            if decision.accepted_for_tracking:
                 accepted.append(updated_track)
             else:
                 rejected.append(updated_track)
@@ -407,7 +409,7 @@ class PersonBoxGate:
 
         return PersonBoxDecision(
             track_id=int(track.track_id),
-            accepted=accepted_for_headwear,
+            accepted=accepted_for_tracking,
             accepted_for_tracking=accepted_for_tracking,
             accepted_for_headwear=accepted_for_headwear,
             reason_codes=self._unique_reasons(reasons),
@@ -982,15 +984,11 @@ class PersonBoxGate:
             and is_in_problem_corridor
             and has_fragment_geometry
         )
-        severe_headless_geometry = bool(
-            is_in_problem_corridor
-            and height_ratio >= min_height_ratio
-            and width_ratio <= max_width_ratio * 0.80
-            and area_ratio <= max_area_ratio * 0.80
-            and aspect_ratio <= max_aspect_ratio * 0.85
-        )
-
-        return bool(zone_assisted_headless_fragment or severe_headless_geometry)
+        # In the head-detector based chain, a geometrically "headless" person box
+        # is not enough to suppress the person episode. This rule is allowed to
+        # reject only when a configured internal occluder zone actually supports
+        # the fragment hypothesis.
+        return bool(zone_assisted_headless_fragment)
 
     def _is_internal_occluder_fragment(
         self,

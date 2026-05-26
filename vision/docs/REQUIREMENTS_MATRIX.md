@@ -552,3 +552,8 @@ python -m compileall -q app run_runtime.py check_video_runtime.py tools
 | Tracking diagnostics must not become ReID | `TrackDiagnosticsAnalyzer` emits suspicion counters only and does not merge episodes or identify people. | implemented |
 | Tracking and headwear inference frequencies may differ | `TRACKING_FPS` and `HEADWEAR_CLASSIFICATION_FPS` are separate settings; `PROCESSED_VIDEO_ANALYSIS_FPS` is fallback. | implemented |
 | Frames processed by tracking but not scheduled for headwear inference must not create incidents | Runtime emits `headwear_classification_not_scheduled` and skips incident/evidence logic for that frame. | implemented |
+
+
+## REQ-013. Безопасное неизвестное состояние
+
+Headwear `UNKNOWN` лучше ложного `VIOLATION`: если голова не найдена, обрезана, перекрыта, неоднозначна или crop не является clean head crop, runtime не должен создавать нарушение.

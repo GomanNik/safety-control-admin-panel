@@ -4,8 +4,9 @@
 # - Performs production quality validation for a tracked human bbox.
 # - Produces a stable QualityAssessment contract for downstream modules:
 #   TrackEpisodeRegistry, HumanObservation, HeadwearDetector and IncidentEngine.
-# - Evaluates geometry, bbox size, crop/truncation, occlusion,
-#   head visibility and downstream usability flags.
+# - Evaluates person-track geometry separately from headwear usability.
+# - Head visibility/crop problems may make headwear not evaluable, but must
+#   not by themselves invalidate a stable person episode.
 # - Does not assign person_id/day_person_id.
 # - Does not perform ReID, appearance matching, headwear decision
 #   or incident logic.
@@ -263,16 +264,20 @@ class QualityGate:
             and head_visibility_score.value < 0.75
         )
 
+        # Border crop is a headwear-classification risk, not automatically a
+        # person-track failure. A top-cropped but large and stable worker body
+        # must still produce/continue an episode; the HeadDetector path will
+        # later decide whether a head crop exists and is actionable.
         is_border_fragment = bool(
             (left_is_cropped or right_is_cropped or top_is_cropped)
             and (
-                head_is_cropped
-                or not head_visible
-                or clipped_bbox.width < frame_width * 0.16
+                clipped_bbox.width < frame_width * 0.10
                 or bbox_area_ratio < max(
                     0.0007,
-                    self._setting_float("min_bbox_area_ratio", 0.008) * 1.5,
+                    self._setting_float("min_bbox_area_ratio", 0.008) * 1.2,
                 )
+                or aspect_ratio < 0.14
+                or aspect_ratio > 1.65
             )
         )
 
@@ -740,8 +745,10 @@ class QualityGate:
             frame_width=frame_width,
             frame_height=frame_height,
         )
-        body_overlap = self._max_zone_overlap_ratio(bbox, zones) if zones else 0.0
-        head_overlap = self._max_zone_overlap_ratio(head_bbox, zones) if zones else 0.0
+        if not zones:
+            return False
+        body_overlap = self._max_zone_overlap_ratio(bbox, zones)
+        head_overlap = self._max_zone_overlap_ratio(head_bbox, zones)
 
         width_ratio = bbox.width / float(max(1, frame_width))
         height_ratio = bbox.height / float(max(1, frame_height))

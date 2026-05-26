@@ -401,6 +401,10 @@ class RuntimeStats(AppModel):
     person_bbox_rejected_headwear_zone_occluded_count: int = 0
     person_bbox_rejected_exit_fragment_count: int = 0
     person_bbox_rejected_edge_fragment_for_headwear_count: int = 0
+    person_bbox_rejected_internal_occluder_fragment_count: int = 0
+    person_bbox_rejected_headless_internal_fragment_count: int = 0
+    person_bbox_rejected_peer_duplicate_fragment_count: int = 0
+    person_bbox_rejected_limb_shape_fragment_count: int = 0
     candidate_tracks_count: int = 0
     promoted_tracks_count: int = 0
     incident_sync_attempts: int = 0

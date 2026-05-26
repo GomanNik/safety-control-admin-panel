@@ -38,9 +38,7 @@ from app.models.schemas import (
     TrackEpisodeRecord,
     TrackEpisodeResponse,
 )
-from app.pipeline.head_detector import HeadObservation, build_head_detector
 from app.pipeline.headwear_detector import HeadwearDetector
-from app.pipeline.headwear_observation import HeadwearObservation, TrackEpisodeBinding, build_headwear_observation_from_assessment
 from app.pipeline.human_observation import TrackObservation, build_track_observation_from_tracking
 from app.pipeline.incident_engine import IncidentEngine
 from app.pipeline.incident_evidence_limiter import IncidentEvidenceLimiter
@@ -80,9 +78,7 @@ class _FrameObservationBundle:
     quality: QualityAssessment
     episode_assignment: TrackEpisodeAssignment
     observation: TrackObservation
-    head_observation: HeadObservation | None = None
     headwear: HeadwearAssessment | None = None
-    headwear_observation: HeadwearObservation | None = None
     evidence_frame_path: str | None = None
     incident_case: IncidentCase | None = None
 
@@ -165,7 +161,6 @@ class VisionRuntimeService:
         self._person_box_gate = PersonBoxGate(settings)
         self._track_episode_registry = TrackEpisodeRegistry(settings, camera_id=self._camera_id)
         self._quality_gate = QualityGate(settings)
-        self._head_detector = build_head_detector(settings)
         self._headwear_detector = HeadwearDetector(settings)
         self._incident_engine = IncidentEngine(settings)
         self._track_diagnostics = TrackDiagnosticsAnalyzer(settings)
@@ -276,14 +271,7 @@ class VisionRuntimeService:
             thread.start()
             return True, f"{job_name} started. Poll GET /runtime/status for progress."
 
-    def collect_person_crops(
-        self,
-        *,
-        source_url: str | None = None,
-        output_dir: str | None = None,
-        max_seconds: float | None = None,
-        start_seconds: float | None = None,
-    ) -> tuple[bool, str]:
+    def collect_person_crops(self, *, source_url: str | None = None, output_dir: str | None = None, max_seconds: float | None = None) -> tuple[bool, str]:
         with self._control_lock:
             if self._export_in_progress:
                 return False, "Person crop collection is already running."
@@ -297,10 +285,6 @@ class VisionRuntimeService:
             effective_max_seconds = float(self._settings.processed_video_max_seconds)
             if max_seconds is not None:
                 effective_max_seconds = max(0.0, float(max_seconds))
-
-            effective_start_seconds = 0.0
-            if start_seconds is not None:
-                effective_start_seconds = max(0.0, float(start_seconds))
 
             try:
                 self._settings.validate_runtime_launch_or_raise(
@@ -321,12 +305,7 @@ class VisionRuntimeService:
             self._set_export_running(True, "Person crop collection started.")
             thread = threading.Thread(
                 target=self._person_crop_collection_worker,
-                kwargs={
-                    "source_url": effective_source_url,
-                    "output_path": output_dir,
-                    "max_seconds": effective_max_seconds,
-                    "start_seconds": effective_start_seconds,
-                },
+                kwargs={"source_url": effective_source_url, "output_path": output_dir, "max_seconds": effective_max_seconds},
                 daemon=True,
             )
             self._export_thread = thread
@@ -353,23 +332,11 @@ class VisionRuntimeService:
                     self._stats.export_eta_sec = 0.0
                 self._export_in_progress = False
 
-    def _person_crop_collection_worker(
-        self,
-        *,
-        source_url: str,
-        output_path: str | None,
-        max_seconds: float,
-        start_seconds: float = 0.0,
-    ) -> None:
+    def _person_crop_collection_worker(self, *, source_url: str, output_path: str | None, max_seconds: float) -> None:
         ok = False
         message = "Person crop collection did not finish."
         try:
-            ok, message = self._collect_person_crops_locked(
-                source_url=source_url,
-                output_dir=output_path,
-                max_seconds=max_seconds,
-                start_seconds=start_seconds,
-            )
+            ok, message = self._collect_person_crops_locked(source_url=source_url, output_dir=output_path, max_seconds=max_seconds)
         except Exception as error:
             logger.exception("Person crop collection failed.")
             message = f"Person crop collection failed: {type(error).__name__}: {error}"
@@ -389,14 +356,7 @@ class VisionRuntimeService:
             else:
                 self._stats.last_export_message = message
 
-    def _collect_person_crops_locked(
-        self,
-        *,
-        source_url: str,
-        output_dir: str | None,
-        max_seconds: float,
-        start_seconds: float = 0.0,
-    ) -> tuple[bool, str]:
+    def _collect_person_crops_locked(self, *, source_url: str, output_dir: str | None, max_seconds: float) -> tuple[bool, str]:
         capture = cv2.VideoCapture(source_url)
         if not capture.isOpened():
             return False, f"Failed to open source video: {source_url}"
@@ -409,24 +369,7 @@ class VisionRuntimeService:
             source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
             source_frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             fallback_fps = self._resolve_processed_video_fps(source_fps)
-            safe_start_seconds = max(0.0, float(start_seconds or 0.0))
-            start_frame_index = self._seek_capture_to_start_seconds(
-                capture=capture,
-                start_seconds=safe_start_seconds,
-                source_fps=source_fps,
-                source_frame_count=source_frame_count,
-                fallback_fps=fallback_fps,
-            )
-            start_timestamp_seconds = self._frame_elapsed_seconds(
-                frame_index=start_frame_index + 1,
-                source_fps=source_fps,
-                output_fps=fallback_fps,
-            )
             collection_fps = max(0.01, float(getattr(self._settings, "person_crop_collection_fps", self._settings.processed_video_analysis_fps)))
-            adaptive_sampling = bool(getattr(self._settings, "person_crop_collection_adaptive_sampling", False))
-            idle_collection_fps = max(0.01, float(getattr(self._settings, "person_crop_collection_idle_fps", 0.2)))
-            active_collection_fps = max(0.01, float(getattr(self._settings, "person_crop_collection_active_fps", 2.0)))
-            active_hold_seconds = max(0.0, float(getattr(self._settings, "person_crop_collection_active_hold_seconds", 10.0)))
             max_samples = max(0, int(getattr(self._settings, "person_crop_collection_max_samples", 0)))
             collection_started_at = utc_now()
             wall_started_at = utc_now()
@@ -443,7 +386,7 @@ class VisionRuntimeService:
             )
 
             stats.total_frames_to_process = self._resolve_total_frames_to_process(
-                source_frame_count=max(0, int(source_frame_count) - int(start_frame_index)),
+                source_frame_count=source_frame_count,
                 source_fps=source_fps,
                 max_seconds=max_seconds,
             )
@@ -451,17 +394,13 @@ class VisionRuntimeService:
             stats.current_tracking_fps = collection_fps
             stats.current_headwear_classification_fps = 0.0
             stats.last_export_output_path = str(store.session_dir)
-            stats.last_export_message = (
-                "Person crop collection is running"
-                + (f" from source timestamp {start_timestamp_seconds:.3f}s." if safe_start_seconds > 0.0 else ".")
-            )
+            stats.last_export_message = "Person crop collection is running."
             stats.tracking_backend = self._person_tracking_engine.last_diagnostics().backend_name
             stats.tracking_ready = self._person_tracking_engine.ready()
             stats.tracking_failure_reason = self._person_tracking_engine.failure_reason()
 
-            frame_index = int(start_frame_index)
+            frame_index = 0
             last_collection_elapsed_sec: float | None = None
-            active_collection_until_sec = start_timestamp_seconds - 1.0
             last_observed_at = collection_started_at
 
             while True:
@@ -474,24 +413,16 @@ class VisionRuntimeService:
                 frame = self._resize_collection_frame_if_needed(frame)
 
                 elapsed_sec = self._frame_elapsed_seconds(frame_index=frame_index, source_fps=source_fps, output_fps=fallback_fps)
-                collection_elapsed_sec = max(0.0, elapsed_sec - start_timestamp_seconds)
-                if max_seconds > 0.0 and collection_elapsed_sec > max_seconds:
+                if max_seconds > 0.0 and elapsed_sec > max_seconds:
                     break
 
-                observed_at = collection_started_at + timedelta(seconds=collection_elapsed_sec)
+                observed_at = collection_started_at + timedelta(seconds=elapsed_sec)
                 last_observed_at = observed_at
-
-                effective_collection_fps = collection_fps
-                if adaptive_sampling:
-                    effective_collection_fps = active_collection_fps if elapsed_sec <= active_collection_until_sec else idle_collection_fps
-
-                stats.current_analysis_fps = effective_collection_fps
-                stats.current_tracking_fps = effective_collection_fps
 
                 should_collect = self._should_analyze_export_frame(
                     elapsed_sec=elapsed_sec,
                     last_analysis_elapsed_sec=last_collection_elapsed_sec,
-                    analysis_fps=effective_collection_fps,
+                    analysis_fps=collection_fps,
                 )
 
                 if should_collect:
@@ -527,11 +458,6 @@ class VisionRuntimeService:
                     stats.person_bbox_rejected_peer_duplicate_fragment_count += person_box_result.rejected_count_by_reason("person_box_rejected_peer_duplicate_fragment")
                     stats.person_bbox_rejected_limb_shape_fragment_count += person_box_result.rejected_count_by_reason("person_box_rejected_limb_shape_fragment")
 
-                    if adaptive_sampling and person_box_result.raw_count > 0:
-                        active_collection_until_sec = max(active_collection_until_sec, elapsed_sec + active_hold_seconds)
-                        stats.current_analysis_fps = active_collection_fps
-                        stats.current_tracking_fps = active_collection_fps
-
                     decisions = person_box_result.decisions_by_track_id
                     for track in person_box_result.accepted_tracks:
                         store.save_sample(
@@ -559,19 +485,18 @@ class VisionRuntimeService:
 
                     if max_samples > 0 and store.accepted_count >= max_samples:
                         stats.last_export_message = f"Person crop collection sample limit reached: {store.accepted_count}."
-                        self._publish_export_state(stats=stats)
+                        self._publish_export_state(stats)
                         break
                 else:
                     stats.total_frames_skipped += 1
 
-                self._update_progress_stats(stats=stats, wall_started_at=wall_started_at, current_frame_index=stats.total_frames_read, observed_at=observed_at)
+                self._update_progress_stats(stats=stats, wall_started_at=wall_started_at, current_frame_index=frame_index, observed_at=observed_at)
                 stats.last_export_output_path = str(store.session_dir)
                 stats.last_export_message = (
                     "Person crop collection is running. "
-                    f"start_seconds={start_timestamp_seconds:.3f}, "
                     f"accepted={store.accepted_count}, rejected={store.rejected_count}."
                 )
-                self._publish_export_state(stats=stats)
+                self._publish_export_state(stats)
 
             stats.active_tracks = 0
             stats.active_track_episodes = 0
@@ -584,11 +509,10 @@ class VisionRuntimeService:
             stats.last_export_output_path = str(store.session_dir)
             stats.last_export_message = (
                 "Person crop collection finished. "
-                f"start_seconds={start_timestamp_seconds:.3f}, "
                 f"accepted={store.accepted_count}, rejected={store.rejected_count}, dir={store.session_dir}"
             )
             store.write_summary()
-            self._publish_export_state(stats=stats)
+            self._publish_export_state(stats)
             return True, stats.last_export_message
         finally:
             capture.release()
@@ -604,7 +528,6 @@ class VisionRuntimeService:
         self._person_tracking_engine.reset()
         self._track_episode_registry.reset()
         self._track_diagnostics.reset()
-        self._head_detector = build_head_detector(self._settings)
         self._incident_engine = IncidentEngine(self._settings)
         self._incident_evidence_limiter.reset()
 
@@ -1337,13 +1260,6 @@ class VisionRuntimeService:
 
             incident_case: IncidentCase | None = None
             should_update_episode_headwear_stats = True
-            timestamp_seconds = self._timestamp_seconds_for_observation(bundle.observation)
-            head_observation = self._head_detector.detect_for_observation(
-                frame=frame,
-                observation=bundle.observation,
-                timestamp_seconds=timestamp_seconds,
-            )
-            bundle.head_observation = head_observation
 
             if not run_headwear:
                 headwear = self._headwear_not_scheduled_assessment(bundle.observation)
@@ -1354,32 +1270,13 @@ class VisionRuntimeService:
                 result.headwear_pre_skipped_count += 1
                 if self._is_visibility_skip_reason(headwear):
                     result.headwear_skipped_visibility_count += 1
-            elif not bool(head_observation.classifier_may_run):
-                headwear = self._head_not_actionable_assessment(bundle.observation, head_observation)
-                result.headwear_classification_not_scheduled_count += 1
             else:
-                headwear = self._headwear_detector.assess_head_observation(
-                    frame=frame,
-                    observation=bundle.observation,
-                    head_observation=head_observation,
-                )
+                headwear = self._headwear_detector.assess_observation(frame=frame, observation=bundle.observation)
                 headwear = self._with_headwear_reason_code(headwear, "headwear_model_called")
                 result.headwear_model_called_count += 1
 
             headwear = self._apply_headwear_model_policy(headwear)
             bundle.headwear = headwear
-
-            track_binding = TrackEpisodeBinding.from_track_observation(
-                observation=bundle.observation,
-                timestamp_seconds=timestamp_seconds,
-                head_observation=head_observation,
-            )
-            headwear_observation = build_headwear_observation_from_assessment(
-                assessment=headwear,
-                track_binding=track_binding,
-                head_observation=head_observation,
-            )
-            bundle.headwear_observation = headwear_observation
 
             if run_headwear and headwear.signal == ComplianceSignal.UNKNOWN:
                 result.headwear_unknown_count += 1
@@ -1388,9 +1285,9 @@ class VisionRuntimeService:
             headwear_skipped_bad_crop = self._headwear_was_skipped_bad_crop(headwear)
 
             if run_headwear and self._headwear_incidents_are_enabled():
-                incident_result = self._incident_engine.process_headwear_observation(
-                    headwear_observation=headwear_observation,
-                    track_binding=track_binding,
+                incident_result = self._incident_engine.process_headwear_assessment(
+                    observation=bundle.observation,
+                    headwear_assessment=headwear,
                     frame_path=None,
                 )
                 incident_case = incident_result.case
@@ -1401,9 +1298,7 @@ class VisionRuntimeService:
                 evidence_frame_path = self._capture_violation_evidence_after_incident_decision(
                     frame=frame,
                     observation=bundle.observation,
-                    head_observation=head_observation,
                     headwear=headwear,
-                    headwear_observation=headwear_observation,
                     case=incident_case,
                 )
             bundle.evidence_frame_path = evidence_frame_path
@@ -1421,7 +1316,7 @@ class VisionRuntimeService:
                 source_track_id=bundle.observation.source_track_id,
                 track_episode_id=bundle.observation.track_episode_id,
                 bbox=RuntimeMetricsRecorder.bbox_to_text(bundle.observation.bbox),
-                head_bbox=RuntimeMetricsRecorder.bbox_to_text(bundle.head_observation.head_bbox if bundle.head_observation is not None else None),
+                head_bbox=RuntimeMetricsRecorder.bbox_to_text(bundle.observation.head_bbox),
                 quality_score=bundle.observation.quality_score,
                 bbox_area_ratio=bundle.observation.bbox_area_ratio,
                 occlusion_ratio=bundle.observation.occlusion_ratio,
@@ -1484,28 +1379,6 @@ class VisionRuntimeService:
                 )
             )
         return result
-
-    @staticmethod
-    def _timestamp_seconds_for_observation(observation: TrackObservation) -> float:
-        value = getattr(observation, "timestamp_seconds", None)
-        try:
-            if value is not None:
-                return float(value)
-        except Exception:
-            pass
-        return 0.0
-
-    @staticmethod
-    def _head_not_actionable_assessment(observation: TrackObservation, head_observation: HeadObservation) -> HeadwearAssessment:
-        status = getattr(head_observation, "status", "head_not_detected")
-        reason = status.value if hasattr(status, "value") else str(status)
-        return HeadwearAssessment(
-            signal=ComplianceSignal.UNKNOWN,
-            confidence=0.0,
-            reason=reason,
-            reason_codes=list(getattr(head_observation, "reason_codes", []) or []) + ["classifier_not_scheduled_without_actionable_head"],
-            quality_score=observation.quality_score,
-        )
 
     @staticmethod
     def _headwear_not_scheduled_assessment(observation: TrackObservation) -> HeadwearAssessment:
@@ -1580,9 +1453,7 @@ class VisionRuntimeService:
         *,
         frame: np.ndarray,
         observation: TrackObservation,
-        head_observation: HeadObservation | None,
         headwear: HeadwearAssessment,
-        headwear_observation: HeadwearObservation | None,
         case: IncidentCase | None,
     ) -> str | None:
         if case is None:
@@ -1590,10 +1461,6 @@ class VisionRuntimeService:
         if case.state != IncidentState.OPEN:
             return None
         if headwear.signal != ComplianceSignal.VIOLATION:
-            return None
-        if headwear_observation is None or not headwear_observation.is_actionable:
-            return None
-        if head_observation is None or not head_observation.classifier_may_run:
             return None
         if not observation.is_usable_for_incident:
             return None
@@ -1618,7 +1485,7 @@ class VisionRuntimeService:
             candidate_id=None,
             incident_id=case.case_id,
             bbox=observation.bbox,
-            head_bbox=head_observation.head_bbox if head_observation is not None else None,
+            head_bbox=observation.head_bbox,
             quality_score=observation.quality_score,
             headwear_status=headwear.signal.value,
             identity_decision_type="track_episode",
@@ -1812,50 +1679,6 @@ class VisionRuntimeService:
         if source_fps > 0:
             return source_fps
         return 7.0
-
-    @staticmethod
-    def _seek_capture_to_start_seconds(
-        *,
-        capture: cv2.VideoCapture,
-        start_seconds: float,
-        source_fps: float,
-        source_frame_count: int,
-        fallback_fps: float,
-    ) -> int:
-        safe_start_seconds = max(0.0, float(start_seconds or 0.0))
-        if safe_start_seconds <= 0.0:
-            return 0
-
-        fps_for_seek = source_fps if source_fps > 0.0 else fallback_fps
-        requested_frame_index = int(math.floor(safe_start_seconds * max(0.01, float(fps_for_seek))))
-        if source_frame_count > 0:
-            requested_frame_index = min(requested_frame_index, max(0, int(source_frame_count) - 1))
-        requested_frame_index = max(0, requested_frame_index)
-
-        seek_ok = False
-        if source_fps > 0.0:
-            try:
-                seek_ok = bool(capture.set(cv2.CAP_PROP_POS_FRAMES, requested_frame_index))
-            except Exception:
-                seek_ok = False
-
-        if not seek_ok:
-            try:
-                seek_ok = bool(capture.set(cv2.CAP_PROP_POS_MSEC, safe_start_seconds * 1000.0))
-            except Exception:
-                seek_ok = False
-
-        actual_frame_index = requested_frame_index
-        try:
-            reported_frame_index = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or requested_frame_index)
-            if reported_frame_index > 0:
-                actual_frame_index = reported_frame_index
-        except Exception:
-            actual_frame_index = requested_frame_index
-
-        if source_frame_count > 0:
-            actual_frame_index = min(actual_frame_index, max(0, int(source_frame_count) - 1))
-        return max(0, int(actual_frame_index))
 
     def _resolve_total_frames_to_process(self, *, source_frame_count: int, source_fps: float, max_seconds: float) -> int:
         if max_seconds > 0.0:

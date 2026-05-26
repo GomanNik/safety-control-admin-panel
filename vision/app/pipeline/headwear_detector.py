@@ -28,6 +28,7 @@ import numpy as np
 
 from app.config import Settings
 from app.models.schemas import BBox, ComplianceSignal, HeadwearAssessment, QualityAssessment
+from app.pipeline.head_detector import HeadObservation, HeadObservationStatus
 from app.pipeline.human_observation import HumanObservation, ObservationType
 
 try:
@@ -93,11 +94,11 @@ class HeadwearDetector:
         self._violation_labels = self._normalize_label_set(settings.headwear_violation_labels)
         self._unknown_labels = self._normalize_label_set(settings.headwear_unknown_labels)
 
-        self._debug_enabled = bool(settings.headwear_debug_save_crops)
-        self._debug_base_dir = Path(settings.headwear_debug_dir).expanduser()
+        self._debug_enabled = bool(getattr(settings, "headwear_debug_save_crops", False))
+        self._debug_base_dir = Path(getattr(settings, "headwear_debug_dir", "./data/debug/headwear")).expanduser()
         self._debug_dir = self._debug_base_dir
-        self._debug_max_samples = max(0, int(settings.headwear_debug_max_samples))
-        self._debug_every_n = max(1, int(settings.headwear_debug_every_n))
+        self._debug_max_samples = max(0, int(getattr(settings, "headwear_debug_max_samples", 0)))
+        self._debug_every_n = max(1, int(getattr(settings, "headwear_debug_every_n", 1)))
         self._debug_counter = 0
         self._debug_saved = 0
         self._debug_lock = Lock()
@@ -133,12 +134,43 @@ class HeadwearDetector:
     def warmup(self) -> tuple[bool, str | None]:
         return self._warmup_onnx_session()
 
+    def assess_head_observation(
+        self,
+        *,
+        frame: np.ndarray,
+        observation: HumanObservation,
+        head_observation: HeadObservation,
+    ) -> HeadwearAssessment:
+        rejection = self._reject_head_observation_for_headwear(
+            frame=frame,
+            observation=observation,
+            head_observation=head_observation,
+        )
+        if rejection is not None:
+            return rejection
+        quality = self._quality_from_head_observation(observation=observation, head_observation=head_observation)
+        return self._assess_head_crop_candidate(
+            frame=frame,
+            observation=observation,
+            head_observation=head_observation,
+            quality=quality,
+        )
+
     def assess_observation(
         self,
         *,
         frame: np.ndarray,
         observation: HumanObservation,
     ) -> HeadwearAssessment:
+        policy = str(getattr(self._settings, "headwear_model_policy", "diagnostic_only") or "diagnostic_only").strip().lower()
+        if policy == "production" and not bool(getattr(self._settings, "allow_legacy_geometry_head_fallback", False)):
+            return HeadwearAssessment(
+                signal=ComplianceSignal.UNKNOWN,
+                confidence=0.0,
+                reason="head_detector_required",
+                reason_codes=["head_detector_required", "classifier_not_scheduled_without_head"],
+                quality_score=getattr(observation, "quality_score", None),
+            )
         rejection = self._reject_observation_for_headwear(
             frame=frame,
             observation=observation,
@@ -152,6 +184,45 @@ class HeadwearDetector:
             observation=observation,
             quality=quality,
         )
+
+    def assess(
+        self,
+        *,
+        frame: np.ndarray,
+        bbox: BBox,
+        quality: QualityAssessment,
+    ) -> HeadwearAssessment:
+        # Legacy low-level API retained for tests and old debug tools only.
+        if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0 or frame.ndim < 2:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="frame_unavailable")
+        if bbox is None or bbox.width <= 0 or bbox.height <= 0:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="invalid_observation_bbox")
+        if not quality.is_valid:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="quality_rejected")
+        if not quality.head_visible:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="head_not_visible")
+        if bool(quality.is_low_quality):
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="quality_low_for_headwear")
+        if not bool(quality.is_usable_for_headwear):
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="quality_not_usable_for_headwear")
+        if bool(getattr(quality, "is_interaction_risk", False)):
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="quality_interaction_risk_headwear_skipped", reason_codes=["interaction_risk"])
+        if self.mode == "placeholder":
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="placeholder_mode")
+        crop_bundle = self._extract_person_crop_bundle(frame=frame, bbox=bbox)
+        if crop_bundle is None:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="person_crop_unavailable", reason_codes=["person_crop_rejected", "headwear_skipped_bad_crop"])
+        self._assert_classifier_input_crop_type("person")
+        if self._session is None or self._input_name is None:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason=self.failure_reason or "onnx_session_unavailable")
+        try:
+            if self.mode == "onnx_classifier":
+                return self._assess_classifier(crop_bundle.crop)
+            if self.mode == "onnx_detector":
+                return self._assess_detector(crop_bundle.crop)
+        except Exception as error:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason=f"headwear_inference_failed:{type(error).__name__}")
+        return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="unknown_headwear_mode")
 
     def assess_human_observation(
         self,
@@ -234,14 +305,6 @@ class HeadwearDetector:
                 reason_codes=["interaction_risk"],
             )
 
-        if hasattr(quality, "headwear_context_usable") and not bool(quality.headwear_context_usable):
-            return HeadwearAssessment(
-                signal=ComplianceSignal.UNKNOWN,
-                confidence=0.0,
-                reason="quality_headwear_context_not_usable",
-                reason_codes=["headwear_context_not_usable"],
-            )
-
         if self.mode == "placeholder":
             return HeadwearAssessment(
                 signal=ComplianceSignal.UNKNOWN,
@@ -260,6 +323,8 @@ class HeadwearDetector:
                 reason="person_crop_unavailable",
                 reason_codes=["person_crop_rejected", "headwear_skipped_bad_crop"],
             )
+
+        self._assert_classifier_input_crop_type("person")
 
         if self._session is None or self._input_name is None:
             assessment = HeadwearAssessment(
@@ -338,9 +403,96 @@ class HeadwearDetector:
         )
         return assessment
 
+    def _assess_head_crop_candidate(
+        self,
+        *,
+        frame: np.ndarray,
+        observation: HumanObservation,
+        head_observation: HeadObservation,
+        quality: QualityAssessment,
+    ) -> HeadwearAssessment:
+        if self.mode == "placeholder":
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="placeholder_mode")
+        crop_bundle = self._extract_head_crop_bundle(frame=frame, bbox=head_observation.head_bbox)
+        if crop_bundle is None:
+            return HeadwearAssessment(
+                signal=ComplianceSignal.UNKNOWN,
+                confidence=0.0,
+                reason="head_crop_unavailable",
+                reason_codes=["head_crop_rejected", "headwear_skipped_bad_crop"],
+                quality_score=quality.quality_score,
+            )
+        self._assert_classifier_input_crop_type("head")
+        if self._session is None or self._input_name is None:
+            assessment = HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason=self.failure_reason or "onnx_session_unavailable")
+            self._save_debug_sample(frame=frame, person_bbox=observation.bbox, crop_bbox=crop_bundle.bbox, crop=crop_bundle.crop, quality=quality, assessment=assessment, observation=observation, crop_type="head", head_bbox=head_observation.head_bbox)
+            return assessment
+        try:
+            if self.mode == "onnx_classifier":
+                assessment = self._assess_classifier(crop_bundle.crop)
+            elif self.mode == "onnx_detector":
+                assessment = self._assess_detector(crop_bundle.crop)
+            else:
+                assessment = HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="unknown_headwear_mode")
+        except Exception as error:
+            assessment = HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason=f"headwear_inference_failed:{type(error).__name__}")
+        self._save_debug_sample(frame=frame, person_bbox=observation.bbox, crop_bbox=crop_bundle.bbox, crop=crop_bundle.crop, quality=quality, assessment=assessment, observation=observation, crop_type="head", head_bbox=head_observation.head_bbox)
+        return assessment
+
     # ========================================================
     # Observation gate
     # ========================================================
+
+    def _reject_head_observation_for_headwear(
+        self,
+        *,
+        frame: np.ndarray,
+        observation: HumanObservation,
+        head_observation: HeadObservation,
+    ) -> HeadwearAssessment | None:
+        if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0 or frame.ndim < 2:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="frame_unavailable")
+        if head_observation is None:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="head_observation_missing", reason_codes=["head_observation_missing", "classifier_not_scheduled_without_head"])
+        if not bool(head_observation.classifier_may_run):
+            status = getattr(head_observation, "status", "head_not_actionable")
+            reason = status.value if hasattr(status, "value") else str(status)
+            return HeadwearAssessment(
+                signal=ComplianceSignal.UNKNOWN,
+                confidence=0.0,
+                reason=reason,
+                reason_codes=list(getattr(head_observation, "reason_codes", []) or []) + ["classifier_not_scheduled_without_actionable_head"],
+                quality_score=getattr(observation, "quality_score", None),
+            )
+        if head_observation.head_bbox is None or not head_observation.head_bbox.is_valid:
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="head_crop_bbox_unavailable", reason_codes=["head_crop_rejected", "headwear_skipped_bad_crop"])
+        if bool(getattr(observation, "interaction_risk", False)):
+            return HeadwearAssessment(signal=ComplianceSignal.UNKNOWN, confidence=0.0, reason="track_interaction_risk_headwear_skipped", reason_codes=["track_interaction_risk"])
+        return None
+
+    def _quality_from_head_observation(self, *, observation: HumanObservation, head_observation: HeadObservation) -> QualityAssessment:
+        base = self._quality_from_observation(observation)
+        actionable = bool(head_observation.classifier_may_run)
+        status = getattr(head_observation, "status", HeadObservationStatus.UNKNOWN)
+        return QualityAssessment(
+            is_valid=actionable,
+            quality_score=max(float(getattr(base, "quality_score", 0.0) or 0.0), float(getattr(head_observation, "confidence", 0.0) or 0.0)),
+            head_visible=actionable,
+            is_cropped=status == HeadObservationStatus.HEAD_CROPPED_BY_BORDER,
+            occlusion_ratio=float(getattr(base, "occlusion_ratio", 0.0) or 0.0),
+            bbox_area_ratio=float(getattr(base, "bbox_area_ratio", 0.0) or 0.0),
+            is_usable_for_tracking=bool(getattr(base, "is_usable_for_tracking", True)),
+            is_usable_for_headwear=actionable,
+            is_low_quality=not actionable,
+            is_truncated=bool(getattr(base, "is_truncated", False)) or status == HeadObservationStatus.HEAD_CROPPED_BY_BORDER,
+            is_occluded=bool(getattr(base, "is_occluded", False)) or status == HeadObservationStatus.HEAD_OCCLUDED,
+            is_interaction_risk=bool(getattr(base, "is_interaction_risk", False)),
+            headwear_context_usable=actionable,
+            visibility_state=status.value if hasattr(status, "value") else str(status),
+            reasons=list(getattr(base, "reasons", []) or []),
+            reason_codes=list(getattr(base, "reason_codes", []) or []) + list(getattr(head_observation, "reason_codes", []) or []),
+            is_usable_for_identity=False,
+        )
 
     def _reject_observation_for_headwear(
         self,
@@ -368,14 +520,6 @@ class HeadwearDetector:
                 confidence=0.0,
                 reason="track_interaction_risk_headwear_skipped",
                 reason_codes=["track_interaction_risk"],
-            )
-
-        if not bool(getattr(observation, "headwear_context_usable", False)):
-            return HeadwearAssessment(
-                signal=ComplianceSignal.UNKNOWN,
-                confidence=0.0,
-                reason="headwear_context_not_usable",
-                reason_codes=["headwear_context_not_usable"],
             )
 
         if observation.observation_type in {
@@ -408,6 +552,14 @@ class HeadwearDetector:
                 signal=ComplianceSignal.UNKNOWN,
                 confidence=0.0,
                 reason="observation_not_usable_for_headwear",
+            )
+
+        if not bool(getattr(observation, "headwear_context_usable", False)):
+            return HeadwearAssessment(
+                signal=ComplianceSignal.UNKNOWN,
+                confidence=0.0,
+                reason="headwear_context_not_usable",
+                reason_codes=["headwear_context_not_usable"],
             )
 
         clipped_person_bbox = self._clip_bbox_to_frame(frame=frame, bbox=observation.bbox)
@@ -710,6 +862,12 @@ class HeadwearDetector:
         if best_violation is not None and best_compliant is not None:
             gap = abs(violation_score - compliant_score)
             if gap < margin_threshold:
+                if source == "detector" and violation_score >= compliant_score:
+                    return self._violation_assessment(
+                        source=source,
+                        item=best_violation,
+                        raw_scores=normalized_raw_scores,
+                    )
                 return HeadwearAssessment(
                     signal=ComplianceSignal.UNKNOWN,
                     confidence=top_score,
@@ -788,7 +946,7 @@ class HeadwearDetector:
         if normalized not in _HARDHAT_NEGATIVE_LABELS:
             return False
 
-        return not bool(getattr(self._settings, "headwear_allow_hardhat_negative_as_violation", False))
+        return not bool(getattr(self._settings, "headwear_allow_hardhat_negative_as_violation", True))
 
     def _run_onnx(self, crop: np.ndarray) -> list[np.ndarray]:
         if self._session is None or self._input_name is None:
@@ -1071,6 +1229,37 @@ class HeadwearDetector:
     # Crop helpers
     # ========================================================
 
+    def _extract_head_crop_bundle(
+        self,
+        *,
+        frame: np.ndarray,
+        bbox: BBox | None,
+    ) -> _PersonCropBundle | None:
+        if bbox is None:
+            return None
+        crop_bbox = self._clip_bbox_to_frame(frame=frame, bbox=bbox)
+        if crop_bbox is None:
+            return None
+        min_width = max(4, int(getattr(self._settings, "head_detector_min_head_width_px", 8)))
+        min_height = max(4, int(getattr(self._settings, "head_detector_min_head_height_px", 8)))
+        if crop_bbox.width < min_width or crop_bbox.height < min_height:
+            return None
+        crop = frame[crop_bbox.y1:crop_bbox.y2, crop_bbox.x1:crop_bbox.x2]
+        if crop.size == 0:
+            return None
+        return _PersonCropBundle(bbox=crop_bbox, crop=crop)
+
+    def _assert_classifier_input_crop_type(self, crop_type: str) -> None:
+        normalized = str(crop_type or "").strip().lower()
+        if normalized == "head":
+            return
+        policy = str(getattr(self._settings, "headwear_model_policy", "diagnostic_only") or "diagnostic_only").strip().lower()
+        if policy == "production":
+            raise RuntimeError(
+                "Production headwear classifier refused non-head crop input: "
+                f"classifier_input_crop_type={normalized!r}"
+            )
+
     def _extract_person_crop_bundle(
         self,
         *,
@@ -1133,6 +1322,8 @@ class HeadwearDetector:
         quality: QualityAssessment,
         assessment: HeadwearAssessment,
         observation: HumanObservation | None,
+        crop_type: str = "person",
+        head_bbox: BBox | None = None,
     ) -> None:
         if not self._debug_enabled:
             return
@@ -1166,8 +1357,8 @@ class HeadwearDetector:
                 f"{sample_index:06d}_{created_at}_{track_episode_id}_track-{track_id}_{signal}_{confidence:.3f}_{label}"
             )
 
-            crop_path = self._debug_dir / f"{base_name}_person_crop.jpg"
-            input_path = self._debug_dir / f"{base_name}_person_input{self._input_width}x{self._input_height}.jpg"
+            crop_path = self._debug_dir / f"{base_name}_{self._safe_filename(crop_type)}_crop.jpg"
+            input_path = self._debug_dir / f"{base_name}_{self._safe_filename(crop_type)}_input{self._input_width}x{self._input_height}.jpg"
             frame_path = self._debug_dir / f"{base_name}_frame.jpg"
 
             cv2.imwrite(str(crop_path), crop)
@@ -1186,7 +1377,7 @@ class HeadwearDetector:
                 annotated,
                 bbox=crop_bbox,
                 color=(0, 255, 255),
-                label="person_crop_sent_to_model",
+                label=f"{crop_type}_crop_sent_to_model",
             )
 
             debug_label = f"{signal} {confidence:.3f} {label} {assessment.reason}"
@@ -1215,6 +1406,8 @@ class HeadwearDetector:
                 crop_path=crop_path,
                 input_path=input_path,
                 frame_path=frame_path,
+                crop_type=crop_type,
+                head_bbox=head_bbox,
             )
             self._append_debug_csv(row)
 
@@ -1236,6 +1429,8 @@ class HeadwearDetector:
         crop_path: Path,
         input_path: Path,
         frame_path: Path,
+        crop_type: str = "person",
+        head_bbox: BBox | None = None,
     ) -> dict[str, str]:
         frame_h, frame_w = frame.shape[:2]
         crop_h, crop_w = crop.shape[:2]
@@ -1257,8 +1452,8 @@ class HeadwearDetector:
             "crop_height": str(crop_h),
             "person_bbox": self._bbox_to_text(person_bbox),
             "person_crop_bbox": self._bbox_to_text(crop_bbox),
-            "model_input_crop_type": "person",
-            "head_crop_bbox": "",
+            "model_input_crop_type": str(crop_type or "person"),
+            "head_crop_bbox": self._bbox_to_text(head_bbox) if head_bbox is not None else "",
             "track_id": self._safe_text(getattr(observation, "track_id", None), fallback=""),
             "source_track_id": self._safe_text(getattr(observation, "source_track_id", None), fallback=""),
             "track_episode_id": self._safe_text(getattr(observation, "track_episode_id", None), fallback=""),

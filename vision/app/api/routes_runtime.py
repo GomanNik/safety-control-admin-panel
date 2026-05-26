@@ -72,3 +72,21 @@ def export_processed_video(
         max_seconds=max_seconds,
     )
     return CommandResponse(ok=ok, message=message)
+
+
+@router.post("/collect-person-crops", response_model=CommandResponse)
+def collect_person_crops(
+    request: Request,
+    source_url: str | None = Query(default=None),
+    output_dir: str | None = Query(default=None),
+    max_seconds: float | None = Query(default=None, ge=0),
+    start_seconds: float | None = Query(default=None, ge=0),
+) -> CommandResponse:
+    service = _get_runtime_service(request)
+    ok, message = service.collect_person_crops(
+        source_url=source_url,
+        output_dir=output_dir,
+        max_seconds=max_seconds,
+        start_seconds=start_seconds,
+    )
+    return CommandResponse(ok=ok, message=message)

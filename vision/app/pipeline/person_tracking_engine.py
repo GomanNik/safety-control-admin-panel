@@ -93,6 +93,12 @@ class PersonTrackingEngine:
     # ========================================================
 
     def warmup(self) -> tuple[bool, str | None]:
+        return self._warmup_ultralytics(mode="track")
+
+    def warmup_detection_only(self) -> tuple[bool, str | None]:
+        return self._warmup_ultralytics(mode="detect")
+
+    def _warmup_ultralytics(self, *, mode: str) -> tuple[bool, str | None]:
         if self._backend_type == TrackingBackendType.DISABLED:
             return False, self._failure_reason or "person tracking backend is disabled"
 
@@ -109,16 +115,19 @@ class PersonTrackingEngine:
 
         try:
             frame = np.zeros((160, 160, 3), dtype=np.uint8)
-            _ = self._call_ultralytics_track(frame=frame, persist=False, verbose=False)
+            if mode == "detect":
+                _ = self._call_ultralytics_predict(frame=frame, verbose=False)
+            else:
+                _ = self._call_ultralytics_track(frame=frame, persist=False, verbose=False)
             return True, None
         except Exception as error:  # pragma: no cover - depends on external backend
             self._ready = False
-            self._failure_reason = f"person tracking warmup failed: {type(error).__name__}: {error}"
+            self._failure_reason = f"person {mode} warmup failed: {type(error).__name__}: {error}"
             self._last_diagnostics = self._build_diagnostics(
                 processed_detections=0,
                 visible_tracks_count=0,
                 raw_tracks_count=0,
-                reason_codes=["tracking_warmup_failed"],
+                reason_codes=[f"{mode}_warmup_failed"],
                 warnings=[self._failure_reason],
             )
             return False, self._failure_reason
@@ -126,6 +135,28 @@ class PersonTrackingEngine:
     def process_frame(self, *, frame: np.ndarray, observed_at: datetime) -> TrackingFrameResult:
         self._frame_index += 1
 
+        validation_error = self._validate_frame_request(frame=frame, observed_at=observed_at)
+        if validation_error is not None:
+            return validation_error
+
+        if self._backend_type == TrackingBackendType.ULTRALYTICS:
+            return self._process_with_ultralytics(frame=frame, observed_at=observed_at)
+
+        return self._fail_result(observed_at=observed_at, reason="unsupported_tracking_backend")
+
+    def process_frame_detection_only(self, *, frame: np.ndarray, observed_at: datetime) -> TrackingFrameResult:
+        self._frame_index += 1
+
+        validation_error = self._validate_frame_request(frame=frame, observed_at=observed_at)
+        if validation_error is not None:
+            return validation_error
+
+        if self._backend_type == TrackingBackendType.ULTRALYTICS:
+            return self._process_with_ultralytics_detection_only(frame=frame, observed_at=observed_at)
+
+        return self._fail_result(observed_at=observed_at, reason="unsupported_detection_backend")
+
+    def _validate_frame_request(self, *, frame: np.ndarray, observed_at: datetime) -> TrackingFrameResult | None:
         if not isinstance(observed_at, datetime):
             return self._fail_result(observed_at=datetime.utcnow(), reason="invalid_observed_at")
 
@@ -147,10 +178,7 @@ class PersonTrackingEngine:
         if frame.ndim not in {2, 3}:
             return self._fail_result(observed_at=observed_at, reason="invalid_frame_dimensions")
 
-        if self._backend_type == TrackingBackendType.ULTRALYTICS:
-            return self._process_with_ultralytics(frame=frame, observed_at=observed_at)
-
-        return self._fail_result(observed_at=observed_at, reason="unsupported_tracking_backend")
+        return None
 
     def reset(self) -> None:
         self._frame_index = 0
@@ -397,6 +425,43 @@ class PersonTrackingEngine:
             diagnostics=diagnostics,
         )
 
+    def _process_with_ultralytics_detection_only(self, *, frame: np.ndarray, observed_at: datetime) -> TrackingFrameResult:
+        if self._model is None:
+            return self._fail_result(observed_at=observed_at, reason="ultralytics_model_unavailable")
+
+        try:
+            results = self._call_ultralytics_predict(frame=frame, verbose=False)
+        except Exception as error:
+            reason = f"ultralytics_predict_failed:{type(error).__name__}"
+            self._last_diagnostics = self._build_diagnostics(
+                processed_detections=0,
+                visible_tracks_count=0,
+                raw_tracks_count=0,
+                reason_codes=[reason],
+                warnings=[str(error)],
+            )
+            return self._fail_result(observed_at=observed_at, reason=reason)
+
+        parsed = self._parse_ultralytics_detection_results(results=results, observed_at=observed_at, frame_shape=frame.shape)
+        diagnostics = self._build_diagnostics(
+            processed_detections=parsed.processed_detections,
+            visible_tracks_count=len(parsed.visible_tracks),
+            raw_tracks_count=parsed.raw_tracks_count,
+            reason_codes=parsed.reason_codes or ["detection_only_ok"],
+            warnings=parsed.warnings,
+        )
+        self._last_diagnostics = diagnostics
+
+        return TrackingFrameResult(
+            observed_at=observed_at,
+            frame_index=self._frame_index,
+            visible_tracks=parsed.visible_tracks,
+            lost_track_ids=[],
+            removed_track_ids=[],
+            backend=self._backend_type,
+            diagnostics=diagnostics,
+        )
+
     def _call_ultralytics_track(self, *, frame: np.ndarray, persist: bool, verbose: bool) -> Any:
         if self._model is None:
             raise RuntimeError("Ultralytics model is not initialized")
@@ -406,6 +471,19 @@ class PersonTrackingEngine:
             persist=bool(persist),
             tracker=self._tracker_config_path or None,
             conf=self._tracking_min_confidence(),
+            classes=[self._person_class_id()],
+            device=self._device,
+            verbose=bool(verbose),
+        )
+
+    def _call_ultralytics_predict(self, *, frame: np.ndarray, verbose: bool) -> Any:
+        if self._model is None:
+            raise RuntimeError("Ultralytics model is not initialized")
+
+        return self._model.predict(
+            source=frame,
+            conf=self._tracking_min_confidence(),
+            iou=self._person_iou_threshold(),
             classes=[self._person_class_id()],
             device=self._device,
             verbose=bool(verbose),
@@ -512,6 +590,95 @@ class PersonTrackingEngine:
             reason_codes=self._unique_values(reason_codes),
             warnings=self._unique_values(warnings),
         )
+
+    def _parse_ultralytics_detection_results(self, *, results: Any, observed_at: datetime, frame_shape: tuple[int, ...]) -> _ParsedUltralyticsResult:
+        parsed: list[TrackedPersonObservation] = []
+        reason_codes: list[str] = []
+        warnings: list[str] = []
+
+        result_items = results if isinstance(results, (list, tuple)) else [results]
+        person_class_id = self._person_class_id()
+        min_conf = self._tracking_min_confidence()
+
+        raw_tracks_count = 0
+        processed_detections = 0
+
+        for result in result_items:
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                reason_codes.append("ultralytics_result_without_boxes")
+                continue
+
+            count = self._boxes_count(boxes)
+            raw_tracks_count += count
+
+            for index in range(count):
+                class_id = self._extract_class_id(boxes=boxes, index=index)
+                if class_id is None:
+                    reason_codes.append("detection_without_class_id")
+                    continue
+                if int(class_id) != person_class_id:
+                    reason_codes.append("non_person_detection_skipped")
+                    continue
+
+                confidence = self._extract_confidence(boxes=boxes, index=index)
+                if confidence < min_conf:
+                    reason_codes.append("low_confidence_detection_skipped")
+                    continue
+
+                bbox = self._extract_bbox(boxes=boxes, index=index)
+                if bbox is None:
+                    reason_codes.append("detection_without_bbox")
+                    continue
+
+                bbox = self._normalize_bbox(bbox=bbox, frame_shape=frame_shape)
+                if bbox is None:
+                    reason_codes.append("invalid_bbox_skipped")
+                    continue
+
+                processed_detections += 1
+                synthetic_track_id = self._synthetic_detection_id(detection_index=processed_detections)
+
+                parsed.append(
+                    TrackedPersonObservation(
+                        track_id=synthetic_track_id,
+                        bbox=bbox,
+                        confidence=confidence,
+                        observed_at=observed_at,
+                        frame_index=self._frame_index,
+                        track_state=ExternalTrackState.NEW,
+                        track_age=1,
+                        track_hits=1,
+                        time_since_update=0,
+                        class_id=int(class_id),
+                        class_name="person",
+                        detector_confidence=confidence,
+                        tracking_confidence=confidence,
+                        source_backend=TrackingBackendType.ULTRALYTICS,
+                        is_confirmed_track=True,
+                        is_visible=True,
+                        is_shadow=False,
+                        shadow_of_track_id=None,
+                        reason_codes=["external_detector_visible", "detection_only"],
+                        embedding=None,
+                        embedding_quality=0.0,
+                    )
+                )
+
+        parsed.sort(key=lambda item: item.track_id)
+        if not reason_codes:
+            reason_codes.append("detection_only_ok")
+
+        return _ParsedUltralyticsResult(
+            visible_tracks=parsed,
+            raw_tracks_count=raw_tracks_count,
+            processed_detections=processed_detections,
+            reason_codes=self._unique_values(reason_codes),
+            warnings=self._unique_values(warnings),
+        )
+
+    def _synthetic_detection_id(self, *, detection_index: int) -> int:
+        return int(self._frame_index) * 10000 + max(1, int(detection_index))
 
     def _extract_track_id(self, *, boxes: Any, index: int) -> int | None:
         ids = getattr(boxes, "id", None)
@@ -646,6 +813,9 @@ class PersonTrackingEngine:
 
     def _tracking_min_confidence(self) -> float:
         return self._clip01(self._safe_float(getattr(self._settings, "person_tracking_min_confidence", 0.35), 0.35))
+
+    def _person_iou_threshold(self) -> float:
+        return self._clip01(self._safe_float(getattr(self._settings, "person_iou_threshold", 0.45), 0.45))
 
     def _person_class_id(self) -> int:
         return max(0, self._safe_int(getattr(self._settings, "person_tracking_person_class_id", 0), 0))

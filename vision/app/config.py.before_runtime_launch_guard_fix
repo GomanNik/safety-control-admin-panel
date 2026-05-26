@@ -1278,7 +1278,7 @@ class Settings:
         headwear_mode = self.headwear_detector_mode.strip().lower()
         collection_mode = bool(getattr(self, "person_crop_collection_enabled", False))
         must_require_real_headwear = self.runtime_require_real_headwear if require_real_headwear is None else require_real_headwear
-        if collection_mode and require_real_headwear is None:
+        if collection_mode:
             must_require_real_headwear = False
 
         if must_require_real_headwear and headwear_mode == "placeholder":

@@ -33,13 +33,32 @@ class ObservationType(str, Enum):
     UNKNOWN = TrackObservationType.UNKNOWN.value
 
 
-@dataclass(slots=True)
+@dataclass(init=False, slots=True)
 class VisibleParts:
     head: bool = False
     face: bool = False
     upper_body: bool = False
     lower_body: bool = False
     footwear: bool = False
+
+    def __init__(
+        self,
+        head: bool = False,
+        face: bool = False,
+        upper_body: bool = False,
+        lower_body: bool = False,
+        footwear: bool = False,
+        head_visible: bool | None = None,
+        face_visible: bool | None = None,
+        upper_body_visible: bool | None = None,
+        lower_body_visible: bool | None = None,
+        footwear_visible: bool | None = None,
+    ) -> None:
+        self.head = bool(head if head_visible is None else head_visible)
+        self.face = bool(face if face_visible is None else face_visible)
+        self.upper_body = bool(upper_body if upper_body_visible is None else upper_body_visible)
+        self.lower_body = bool(lower_body if lower_body_visible is None else lower_body_visible)
+        self.footwear = bool(footwear if footwear_visible is None else footwear_visible)
 
 
 @dataclass(slots=True)
@@ -125,8 +144,82 @@ class TrackObservation:
         return self.track_episode_id or f"track_{self.track_id}"
 
 
-# Compatibility alias used by HeadwearDetector and older debug scripts.
-HumanObservation = TrackObservation
+# Compatibility wrapper used by HeadwearDetector and older debug scripts.
+# New runtime code builds TrackObservation through build_track_observation_from_tracking().
+# Some legacy tests/tools still instantiate HumanObservation with the pre-track-centric
+# keyword set (day_person_id, candidate_id, identity_* and usability aliases). Keep
+# that surface accepted here, but normalize it into canonical TrackObservation fields.
+class HumanObservation(TrackObservation):
+    __slots__ = ()
+
+    def __init__(self, **kwargs):
+        track_id_raw = kwargs.pop("track_id", kwargs.pop("source_track_id", 0))
+        try:
+            track_id = int(track_id_raw)
+        except Exception:
+            track_id = 0
+        source_track_id_raw = kwargs.pop("source_track_id", track_id)
+        try:
+            source_track_id = int(source_track_id_raw)
+        except Exception:
+            source_track_id = track_id
+
+        legacy_day_person_id = kwargs.pop("day_person_id", None)
+        legacy_person_id = kwargs.pop("person_id", None)
+        kwargs.pop("candidate_id", None)
+        kwargs.pop("identity_state", None)
+        kwargs.pop("identity_reason", None)
+        kwargs.pop("confidence", None)
+        kwargs.pop("tracking_confidence", None)
+        kwargs.pop("is_usable_for_incident", None)
+        kwargs.pop("is_usable_for_registry", None)
+        frame_shape = kwargs.pop("frame_shape", None)
+
+        quality = kwargs.pop("quality")
+        visible_parts = kwargs.pop("visible_parts", VisibleParts())
+        bbox = kwargs.pop("bbox")
+        head_bbox = kwargs.pop("head_bbox", None)
+        if head_bbox is None and frame_shape is not None and bool(getattr(visible_parts, "head", False)):
+            try:
+                head_bbox = _build_head_bbox(frame_shape=frame_shape, person_bbox=bbox, quality=quality)
+            except Exception:
+                head_bbox = None
+
+        headwear_alias = kwargs.pop("is_usable_for_headwear", None)
+        if headwear_alias is None:
+            headwear_context_usable = bool(
+                getattr(quality, "headwear_context_usable", False)
+                or (getattr(quality, "is_usable_for_headwear", False) and getattr(visible_parts, "head", False))
+            )
+        else:
+            headwear_context_usable = bool(headwear_alias)
+
+        super().__init__(
+            camera_id=str(kwargs.pop("camera_id")),
+            track_episode_id=kwargs.pop("track_episode_id", None) or legacy_day_person_id or legacy_person_id,
+            source_track_id=source_track_id,
+            track_id=track_id,
+            frame_index=int(kwargs.pop("frame_index")),
+            observed_at=kwargs.pop("observed_at"),
+            bbox=bbox,
+            head_bbox=head_bbox,
+            quality=quality,
+            visible_parts=visible_parts,
+            observation_type=kwargs.pop("observation_type", ObservationType.UNKNOWN),
+            visibility_state=str(kwargs.pop("visibility_state", getattr(quality, "visibility_state", TrackVisibilityState.UNKNOWN.value))),
+            scene_zone=str(kwargs.pop("scene_zone", "unknown")),
+            quality_score=float(kwargs.pop("quality_score", getattr(quality, "quality_score", 0.0))),
+            bbox_area_ratio=float(kwargs.pop("bbox_area_ratio", getattr(quality, "bbox_area_ratio", 0.0))),
+            occlusion_ratio=float(kwargs.pop("occlusion_ratio", getattr(quality, "occlusion_ratio", 0.0))),
+            headwear_context_usable=bool(kwargs.pop("headwear_context_usable", headwear_context_usable)),
+            interaction_risk=bool(kwargs.pop("interaction_risk", getattr(quality, "is_interaction_risk", False))),
+            is_cropped=bool(kwargs.pop("is_cropped", getattr(quality, "is_cropped", False))),
+            is_low_quality=bool(kwargs.pop("is_low_quality", getattr(quality, "is_low_quality", False))),
+            is_truncated=bool(kwargs.pop("is_truncated", getattr(quality, "is_truncated", False))),
+            is_occluded=bool(kwargs.pop("is_occluded", getattr(quality, "is_occluded", False))),
+            reasons=list(kwargs.pop("reasons", getattr(quality, "reasons", []) or [])),
+            reason_codes=list(kwargs.pop("reason_codes", getattr(quality, "reason_codes", []) or [])),
+        )
 
 
 def build_track_observation_from_tracking(
