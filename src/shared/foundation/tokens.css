@@ -1,0 +1,83 @@
+/* =====================
+   shared/foundation/tokens.css
+   ===================== */
+
+:root {
+    /* ---------- Border widths ---------- */
+    --border-width-none: 0px;
+    --border-width-hairline: 1px;
+    --border-width-regular: 1px;
+    --border-width-strong: 2px;
+
+    /* ---------- Motion / durations ---------- */
+    --duration-instant: 0ms;
+    --duration-fast: 120ms;
+    --duration-normal: 180ms;
+    --duration-slow: 280ms;
+    --duration-slower: 420ms;
+
+    --easing-standard: ease;
+    --easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+    --easing-decelerate: cubic-bezier(0, 0, 0, 1);
+    --easing-accelerate: cubic-bezier(0.3, 0, 1, 1);
+
+    --transition-fast: var(--duration-fast) var(--easing-standard);
+    --transition: var(--duration-normal) var(--easing-standard);
+    --transition-slow: var(--duration-slow) var(--easing-standard);
+
+    /* ---------- Z-index scale ---------- */
+    --z-base: 0;
+    --z-sticky: 100;
+    --z-dropdown: 400;
+    --z-overlay: 900;
+    --z-modal: 1000;
+    --z-toast: 1100;
+    --z-tooltip: 1200;
+
+    /* ---------- Density ---------- */
+    --density-scale: 1;
+    --density-space-scale: 1;
+    --density-radius-scale: 1;
+
+    /* ---------- Helper vars ---------- */
+    --focus-outline-offset: 2px;
+    --scrollbar-size: 10px;
+    --measure-readable: 65ch;
+
+    --content-max-width: 1440px;
+    --content-gutter: clamp(16px, 2vw, 24px);
+
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+
+    /* ---------- Viewport helpers ---------- */
+    --viewport-height: 100vh;
+}
+
+/* =============================
+   Density modes
+   ============================= */
+
+html[data-density='compact'] {
+    --density-scale: 0.875;
+    --density-space-scale: 0.875;
+    --density-radius-scale: 0.95;
+}
+
+html[data-density='comfortable'] {
+    --density-scale: 1.125;
+    --density-space-scale: 1.125;
+    --density-radius-scale: 1.05;
+}
+
+/* =============================
+   Modern viewport support
+   ============================= */
+
+@supports (height: 100dvh) {
+    :root {
+        --viewport-height: 100dvh;
+    }
+}

@@ -1,0 +1,335 @@
+/* =====================
+   File: src/widgets/cameras/CameraDetailsWidget/CameraDetailsWidget.css
+   Purpose:
+     Упрощённый details widget камеры:
+     - hero со статусом
+     - live video original / processed
+     - read-only overview
+     - realtime events
+     Без health/settings/incidents.
+   ===================== */
+
+.camera-details-widget {
+    width: 100%;
+    min-width: 0;
+}
+
+.camera-details-widget__root {
+    width: 100%;
+    min-width: 0;
+    padding-top: 20px;
+    padding-bottom: 28px;
+}
+
+.camera-details-widget__section-card {
+    width: 100%;
+    min-width: 0;
+}
+
+.camera-details-widget__hero {
+    border-left: 4px solid var(--ui-border);
+}
+
+.camera-details-widget__hero--success {
+    border-left-color: var(--ui-success);
+}
+
+.camera-details-widget__hero--warning {
+    border-left-color: var(--ui-warning);
+}
+
+.camera-details-widget__hero--critical {
+    border-left-color: var(--ui-danger);
+}
+
+.camera-details-widget__hero--neutral {
+    border-left-color: var(--ui-border);
+}
+
+.camera-details-widget__hero .ui-card__body {
+    display: grid;
+    gap: 14px;
+}
+
+.camera-details-widget__hero-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.camera-details-widget__hero-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.camera-details-widget__hero-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.camera-details-widget__hero-status {
+    display: grid;
+    gap: 8px;
+}
+
+.camera-details-widget__hero-reason {
+    max-width: 76ch;
+}
+
+.camera-details-widget__hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.camera-details-widget__status-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--radius-pill-effective);
+    background: var(--ui-surface-2);
+    color: var(--ui-text-neutral);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.camera-details-widget__status-chip--success {
+    border-color: var(--ui-border-success);
+    background: var(--ui-surface-success);
+    color: var(--ui-text-success);
+}
+
+.camera-details-widget__status-chip--warning {
+    border-color: var(--ui-border-warning);
+    background: var(--ui-surface-warning);
+    color: var(--ui-text-warning);
+}
+
+.camera-details-widget__status-chip--critical {
+    border-color: var(--ui-border-danger);
+    background: var(--ui-surface-danger);
+    color: var(--ui-text-danger);
+}
+
+.camera-details-widget__status-chip--neutral {
+    border-color: var(--ui-border);
+    background: var(--ui-surface-2);
+    color: var(--ui-text-neutral);
+}
+
+.camera-details-widget__layout {
+    width: 100%;
+    min-width: 0;
+}
+
+.camera-details-widget__video-card .ui-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.camera-details-widget__video-body {
+    display: grid;
+    gap: 16px;
+}
+
+.camera-details-widget__video-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.camera-details-widget__video-control-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.camera-details-widget__video-player-shell {
+    overflow: hidden;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--radius-lg-effective);
+    background: #000000;
+}
+
+.camera-details-widget__video-player {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000000;
+    object-fit: cover;
+}
+
+.camera-details-widget__video-empty {
+    display: grid;
+    gap: 8px;
+    padding: 18px;
+    border: 1px dashed var(--ui-border-strong);
+    border-radius: var(--radius-lg-effective);
+    background: var(--ui-surface-2);
+}
+
+.camera-details-widget__signal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.camera-details-widget__signal-grid--aside {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.camera-details-widget__signal-card {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--radius-lg-effective);
+    background: var(--ui-surface);
+}
+
+.camera-details-widget__signal-card--success {
+    border-color: var(--ui-border-success);
+    background: color-mix(in srgb, var(--ui-surface-success) 72%, var(--ui-surface) 28%);
+}
+
+.camera-details-widget__signal-card--warning {
+    border-color: var(--ui-border-warning);
+    background: color-mix(in srgb, var(--ui-surface-warning) 68%, var(--ui-surface) 32%);
+}
+
+.camera-details-widget__signal-card--critical {
+    border-color: var(--ui-border-danger);
+    background: color-mix(in srgb, var(--ui-surface-danger) 68%, var(--ui-surface) 32%);
+}
+
+.camera-details-widget__signal-card--neutral {
+    border-color: var(--ui-border);
+    background: var(--ui-surface);
+}
+
+.camera-details-widget__signal-label {
+    display: block;
+}
+
+.camera-details-widget__events-list {
+    display: grid;
+    gap: 12px;
+}
+
+.camera-details-widget__event-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    padding: 14px 0;
+    border-top: 1px solid var(--ui-border);
+}
+
+.camera-details-widget__event-item:first-child {
+    padding-top: 0;
+    border-top: none;
+}
+
+.camera-details-widget__event-marker {
+    width: 10px;
+    height: 10px;
+    margin-top: 6px;
+    border-radius: 999px;
+    background: var(--ui-text-neutral);
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.camera-details-widget__event-marker--success {
+    color: var(--ui-success);
+    background: var(--ui-success);
+}
+
+.camera-details-widget__event-marker--warning {
+    color: var(--ui-warning);
+    background: var(--ui-warning);
+}
+
+.camera-details-widget__event-marker--critical {
+    color: var(--ui-danger);
+    background: var(--ui-danger);
+}
+
+.camera-details-widget__event-marker--info {
+    color: var(--color-info);
+    background: var(--color-info);
+}
+
+.camera-details-widget__event-content {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.camera-details-widget__event-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.camera-details-widget__event-title {
+    min-width: 0;
+}
+
+.camera-details-widget__event-time {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+    .camera-details-widget__layout {
+        grid-template-columns: 1fr !important;
+    }
+
+    .camera-details-widget__signal-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .camera-details-widget__hero-top {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .camera-details-widget__hero-actions {
+        justify-content: flex-start;
+    }
+
+    .camera-details-widget__video-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .camera-details-widget__signal-grid,
+    .camera-details-widget__signal-grid--aside {
+        grid-template-columns: 1fr;
+    }
+
+    .camera-details-widget__event-top {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

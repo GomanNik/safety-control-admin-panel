@@ -1,0 +1,14 @@
+/* =====================
+   shared/ui/styles/layout.css
+   ===================== */
+
+.ui-grid,
+.ui-stack {
+    width: 100%;
+    min-width: 0;
+}
+
+.ui-grid > *,
+.ui-stack > * {
+    min-width: 0;
+}

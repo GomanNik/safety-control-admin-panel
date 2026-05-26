@@ -1,0 +1,432 @@
+/* =====================
+   File: src/widgets/sites/SiteEditWidget/ui/SiteEditWidget.module.css
+   Purpose:
+   - Shared visual language for site create/edit/setup screens
+   - Supports the real two-step camera create flow UI:
+   - card fields
+   - verification state
+   - connection sections
+   - camera list
+   ===================== */
+
+.root {
+    width: 100%;
+}
+
+.sectionHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.sectionHeaderCopy {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 760px;
+}
+
+.sectionHeaderMeta {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.sectionEyebrow {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid rgba(127, 127, 127, 0.16);
+    background: rgba(127, 127, 127, 0.06);
+}
+
+.metricPill {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 112px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    background: rgba(127, 127, 127, 0.05);
+}
+
+.metricPillLabel {
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.metricPillValue {
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 800;
+}
+
+.infoCard {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 108px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    background:
+            linear-gradient(
+                    180deg,
+                    rgba(127, 127, 127, 0.05) 0%,
+                    rgba(127, 127, 127, 0.025) 100%
+            );
+}
+
+.infoCardLabel {
+    opacity: 0.72;
+    font-weight: 600;
+}
+
+.infoCardValue {
+    font-size: 15px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.noteBox {
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px dashed rgba(127, 127, 127, 0.2);
+    background: rgba(127, 127, 127, 0.04);
+}
+
+.setupShell {
+    display: grid;
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.cameraComposer,
+.cameraListPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+    border-radius: 22px;
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    background:
+            linear-gradient(
+                    180deg,
+                    rgba(127, 127, 127, 0.04) 0%,
+                    rgba(127, 127, 127, 0.02) 100%
+            );
+}
+
+.cameraComposerHeader,
+.cameraListPanelHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.formSection {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+
+.formSectionHeader {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.formSectionTitle {
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 700;
+}
+
+.formSectionDescription {
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.formGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.fieldWide {
+    grid-column: 1 / -1;
+}
+
+.fieldLabel {
+    opacity: 0.86;
+    font-weight: 600;
+}
+
+.control {
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(127, 127, 127, 0.18);
+    background: rgba(127, 127, 127, 0.04);
+    outline: none;
+    transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            transform 0.18s ease,
+            background 0.18s ease;
+    font: inherit;
+}
+
+.control:focus {
+    border-color: rgba(127, 127, 127, 0.35);
+    box-shadow: 0 0 0 4px rgba(127, 127, 127, 0.08);
+    background: rgba(127, 127, 127, 0.06);
+}
+
+.controlError {
+    border-color: rgba(220, 38, 38, 0.42);
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.08);
+}
+
+.checkboxField {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(127, 127, 127, 0.18);
+    background: rgba(127, 127, 127, 0.04);
+}
+
+.checkboxControl {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    flex: 0 0 auto;
+}
+
+.checkboxCopy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.statusCard {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    background: rgba(127, 127, 127, 0.04);
+}
+
+.statusCardNeutral {
+    border-color: rgba(127, 127, 127, 0.14);
+    background: rgba(127, 127, 127, 0.04);
+}
+
+.statusCardSuccess {
+    border-color: rgba(16, 185, 129, 0.22);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.statusCardWarning {
+    border-color: rgba(245, 158, 11, 0.24);
+    background: rgba(245, 158, 11, 0.09);
+}
+
+.statusCardTitle {
+    font-size: 14px;
+    line-height: 1.4;
+    font-weight: 700;
+}
+
+.statusFacts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.statusFact {
+    font-size: 13px;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.statusHint {
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.fieldError,
+.errorText {
+    color: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(220, 38, 38, 0.18);
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.actionsRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+.emptyState {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    text-align: center;
+    border-radius: 18px;
+    border: 1px dashed rgba(127, 127, 127, 0.2);
+    background: rgba(127, 127, 127, 0.03);
+}
+
+.cameraList {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cameraItem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    background: rgba(127, 127, 127, 0.035);
+    transition:
+            transform 0.16s ease,
+            border-color 0.16s ease,
+            box-shadow 0.16s ease,
+            background 0.16s ease;
+}
+
+.cameraItem:hover {
+    transform: translateY(-1px);
+    border-color: rgba(127, 127, 127, 0.24);
+    background: rgba(127, 127, 127, 0.055);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+}
+
+.cameraItemCopy {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.cameraItemTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cameraItemActions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cameraStatusPill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(127, 127, 127, 0.16);
+    background: rgba(127, 127, 127, 0.08);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.footerActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+@media (max-width: 1080px) {
+    .setupShell {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 820px) {
+    .formGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .fieldWide {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 640px) {
+    .sectionHeader,
+    .cameraComposerHeader,
+    .cameraListPanelHeader,
+    .cameraItem,
+    .cameraItemTop {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .footerActions,
+    .actionsRow {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sectionHeaderMeta {
+        width: 100%;
+    }
+
+    .metricPill {
+        width: 100%;
+    }
+
+    .checkboxField {
+        align-items: flex-start;
+    }
+}

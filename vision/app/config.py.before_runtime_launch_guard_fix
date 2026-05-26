@@ -1,0 +1,1325 @@
+# ============================================================
+# File: vision/app/config.py
+# Purpose:
+# - Central runtime settings for the offline vision service.
+# - Loads .env explicitly without external dotenv dependency.
+# - Resolves important relative paths against project/.env dir.
+# - Keeps export, identity, ownership, detector, tracker, ReID and backend contracts in one place.
+# ============================================================
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+
+
+# ============================================================
+# .env loading
+# ============================================================
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _unquote_env_value(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1]
+    return text
+
+
+def _load_env_file(env_file: Path) -> Path | None:
+    if not env_file.exists() or not env_file.is_file():
+        return None
+
+    try:
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = _unquote_env_value(value)
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        return None
+
+    return env_file
+
+
+def _load_project_env() -> Path | None:
+    explicit_env_file = os.getenv("VISION_ENV_FILE", "").strip()
+    if explicit_env_file:
+        return _load_env_file(Path(explicit_env_file).expanduser().resolve())
+
+    return _load_env_file(_PROJECT_ROOT / ".env")
+
+
+_ENV_FILE_PATH = _load_project_env()
+_ENV_BASE_DIR = _ENV_FILE_PATH.parent if _ENV_FILE_PATH is not None else _PROJECT_ROOT
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def _as_names(names: str | tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if isinstance(names, str):
+        return (names,)
+    return tuple(names)
+
+
+def _first_env_value(names: str | tuple[str, ...] | list[str]) -> str | None:
+    for name in _as_names(names):
+        value = os.getenv(name)
+        if value is None:
+            continue
+        normalized = value.strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Unsupported boolean value: {value}")
+
+
+def _env_str(names: str | tuple[str, ...] | list[str], default: str) -> str:
+    value = _first_env_value(names)
+    return value if value is not None else default
+
+
+def _env_int(names: str | tuple[str, ...] | list[str], default: int) -> int:
+    value = _first_env_value(names)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _env_float(names: str | tuple[str, ...] | list[str], default: float) -> float:
+    value = _first_env_value(names)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _env_bool(names: str | tuple[str, ...] | list[str], default: bool) -> bool:
+    value = _first_env_value(names)
+    if value is None:
+        return default
+    try:
+        return _parse_bool(value)
+    except Exception:
+        return default
+
+
+def _env_csv(names: str | tuple[str, ...] | list[str], default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    value = _first_env_value(names)
+    if value is None:
+        return default
+
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return tuple(items) if items else default
+
+
+def _env_float_triplet(names: str | tuple[str, ...] | list[str]) -> tuple[float, float, float] | None:
+    value = _first_env_value(names)
+    if value is None:
+        return None
+
+    parts = [item.strip() for item in value.split(",") if item.strip()]
+    if len(parts) != 3:
+        return None
+
+    try:
+        return float(parts[0]), float(parts[1]), float(parts[2])
+    except Exception:
+        return None
+
+
+def _resolve_person_detector_mode() -> str:
+    explicit_mode = _first_env_value("PERSON_DETECTOR_MODE")
+    if explicit_mode is not None:
+        return explicit_mode
+
+    legacy_use_yolo = _first_env_value("USE_YOLO")
+    if legacy_use_yolo is not None:
+        try:
+            return "ultralytics" if _parse_bool(legacy_use_yolo) else "auto"
+        except Exception:
+            return "auto"
+
+    return "auto"
+
+
+def _normalize_tristate(value: str | None, default: str = "auto") -> str:
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return "true"
+    if normalized in {"0", "false", "no", "off"}:
+        return "false"
+    return "auto"
+
+
+def _in_unit_interval(value: float) -> bool:
+    return 0.0 <= float(value) <= 1.0
+
+
+def _is_probable_url(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        lowered.startswith("rtsp://")
+        or lowered.startswith("rtsps://")
+        or lowered.startswith("http://")
+        or lowered.startswith("https://")
+        or lowered.startswith("udp://")
+        or lowered.startswith("tcp://")
+    )
+
+
+def _resolve_path(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return text
+    if _is_probable_url(text):
+        return text
+
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        return str(path)
+
+    return str((_ENV_BASE_DIR / path).resolve())
+
+
+# ============================================================
+# Settings
+# ============================================================
+
+@dataclass(slots=True)
+class Settings:
+    app_name: str = _env_str("APP_NAME", "vision-runtime")
+    app_host: str = _env_str("APP_HOST", "0.0.0.0")
+    app_port: int = _env_int("APP_PORT", 8090)
+    app_reload: bool = _env_bool("APP_RELOAD", False)
+    log_level: str = _env_str("LOG_LEVEL", "INFO")
+
+    camera_id: str = _env_str("CAMERA_ID", "camera_001")
+    source_url: str = _env_str("SOURCE_URL", "")
+
+    startup_source_probe_timeout_sec: float = _env_float("STARTUP_SOURCE_PROBE_TIMEOUT_SEC", 4.0)
+    startup_source_probe_poll_interval_ms: int = _env_int("STARTUP_SOURCE_PROBE_POLL_INTERVAL_MS", 100)
+    runtime_require_real_headwear: bool = _env_bool("RUNTIME_REQUIRE_REAL_HEADWEAR", True)
+    runtime_require_source_probe_success: bool = _env_bool("RUNTIME_REQUIRE_SOURCE_PROBE_SUCCESS", True)
+    runtime_reid_embedding_enabled: bool = _env_bool("RUNTIME_REID_EMBEDDING_ENABLED", True)
+
+    processed_video_dir: str = _env_str("PROCESSED_VIDEO_DIR", "./data/processed")
+    processed_video_fps: float = _env_float("PROCESSED_VIDEO_FPS", 3.0)
+    processed_video_analysis_fps: float = _env_float("PROCESSED_VIDEO_ANALYSIS_FPS", 1.0)
+    tracking_fps: float = _env_float(("TRACKING_FPS", "PROCESSED_VIDEO_ANALYSIS_FPS"), 1.0)
+    headwear_classification_fps: float = _env_float(
+        "HEADWEAR_CLASSIFICATION_FPS",
+        _env_float(("TRACKING_FPS", "PROCESSED_VIDEO_ANALYSIS_FPS"), 1.0),
+    )
+    processed_video_write_all_frames: bool = _env_bool("PROCESSED_VIDEO_WRITE_ALL_FRAMES", True)
+    processed_video_status_update_every_frames: int = _env_int("PROCESSED_VIDEO_STATUS_UPDATE_EVERY_FRAMES", 30)
+    processed_video_max_width: int = _env_int("PROCESSED_VIDEO_MAX_WIDTH", 1280)
+    processed_video_fourcc: str = _env_str("PROCESSED_VIDEO_FOURCC", "mp4v")
+    processed_video_max_seconds: float = _env_float("PROCESSED_VIDEO_MAX_SECONDS", 0.0)
+    processed_video_draw_rejected_person_boxes: bool = _env_bool("PROCESSED_VIDEO_DRAW_REJECTED_PERSON_BOXES", True)
+    processed_video_draw_accepted_person_boxes: bool = _env_bool("PROCESSED_VIDEO_DRAW_ACCEPTED_PERSON_BOXES", True)
+
+    person_crop_collection_enabled: bool = _env_bool("PERSON_CROP_COLLECTION_ENABLED", False)
+    person_crop_collection_dir: str = _env_str("PERSON_CROP_COLLECTION_DIR", "./data/person_crop_collection")
+    person_crop_collection_fps: float = _env_float(("PERSON_CROP_COLLECTION_FPS", "PROCESSED_VIDEO_ANALYSIS_FPS"), 1.0)
+    person_crop_collection_adaptive_sampling: bool = _env_bool("PERSON_CROP_COLLECTION_ADAPTIVE_SAMPLING", False)
+    person_crop_collection_idle_fps: float = _env_float("PERSON_CROP_COLLECTION_IDLE_FPS", 0.2)
+    person_crop_collection_active_fps: float = _env_float("PERSON_CROP_COLLECTION_ACTIVE_FPS", 2.0)
+    person_crop_collection_active_hold_seconds: float = _env_float("PERSON_CROP_COLLECTION_ACTIVE_HOLD_SECONDS", 10.0)
+    person_crop_collection_max_width: int = _env_int("PERSON_CROP_COLLECTION_MAX_WIDTH", 0)
+    person_crop_collection_max_samples: int = _env_int("PERSON_CROP_COLLECTION_MAX_SAMPLES", 0)
+    person_crop_collection_save_frames: bool = _env_bool("PERSON_CROP_COLLECTION_SAVE_FRAMES", True)
+    person_crop_collection_save_rejected: bool = _env_bool("PERSON_CROP_COLLECTION_SAVE_REJECTED", False)
+    person_crop_collection_jpeg_quality: int = _env_int("PERSON_CROP_COLLECTION_JPEG_QUALITY", 92)
+
+    evidence_dir: str = _env_str("EVIDENCE_DIR", "./data/evidence")
+    evidence_image_ext: str = _env_str("EVIDENCE_IMAGE_EXT", ".jpg")
+    evidence_jpeg_quality: int = _env_int("EVIDENCE_JPEG_QUALITY", 90)
+    evidence_retention_days: int = _env_int("EVIDENCE_RETENTION_DAYS", 14)
+    evidence_cleanup_interval_sec: float = _env_float("EVIDENCE_CLEANUP_INTERVAL_SEC", 300.0)
+
+    person_detector_mode: str = _resolve_person_detector_mode()
+    yolo_model_path: str = _env_str(("PERSON_MODEL_PATH", "YOLO_MODEL_PATH"), "yolov8n.pt")
+    person_onnx_model_path: str = _env_str("PERSON_ONNX_MODEL_PATH", "")
+    person_conf_threshold: float = _env_float("PERSON_CONF_THRESHOLD", 0.35)
+    person_iou_threshold: float = _env_float("PERSON_IOU_THRESHOLD", 0.45)
+    person_onnx_input_width: int = _env_int("PERSON_ONNX_INPUT_WIDTH", 640)
+    person_onnx_input_height: int = _env_int("PERSON_ONNX_INPUT_HEIGHT", 640)
+    person_detector_box_format: str = _env_str("PERSON_DETECTOR_BOX_FORMAT", "cxcywh")
+    person_allow_ultralytics_auto_download: bool = _env_bool("PERSON_ALLOW_ULTRALYTICS_AUTO_DOWNLOAD", False)
+    person_detector_has_objectness: str = _normalize_tristate(_first_env_value("PERSON_DETECTOR_HAS_OBJECTNESS"))
+    person_detector_num_classes: int = _env_int("PERSON_DETECTOR_NUM_CLASSES", 0)
+    person_class_ids: tuple[str, ...] = _env_csv("PERSON_CLASS_IDS")
+
+    person_tracking_backend: str = _env_str("PERSON_TRACKING_BACKEND", "ultralytics")
+    person_tracking_tracker_config: str = _env_str("PERSON_TRACKING_TRACKER_CONFIG", "botsort.yaml")
+    person_tracking_device: str = _env_str("PERSON_TRACKING_DEVICE", "cpu")
+    person_tracking_persist: bool = _env_bool("PERSON_TRACKING_PERSIST", True)
+    person_tracking_require_external: bool = _env_bool("PERSON_TRACKING_REQUIRE_EXTERNAL", True)
+    person_tracking_allow_dev_simple: bool = _env_bool("PERSON_TRACKING_ALLOW_DEV_SIMPLE", False)
+    person_tracking_min_confidence: float = _env_float("PERSON_TRACKING_MIN_CONFIDENCE", 0.35)
+    person_tracking_person_class_id: int = _env_int("PERSON_TRACKING_PERSON_CLASS_ID", 0)
+
+    tracker_iou_threshold: float = _env_float("TRACKER_IOU_THRESHOLD", 0.30)
+    tracker_max_age_frames: int = _env_int("TRACKER_MAX_AGE_FRAMES", 20)
+    tracker_min_hits: int = _env_int("TRACKER_MIN_HITS", 3)
+    tracker_match_threshold: float = _env_float("TRACKER_MATCH_THRESHOLD", 0.35)
+
+    min_quality_score: float = _env_float("MIN_QUALITY_SCORE", 0.55)
+    max_occlusion_ratio: float = _env_float("MAX_OCCLUSION_RATIO", 0.45)
+    crop_border_px: int = _env_int("CROP_BORDER_PX", 4)
+    min_bbox_area_ratio: float = _env_float("MIN_BBOX_AREA_RATIO", 0.008)
+    min_bbox_height_px: int = _env_int("MIN_BBOX_HEIGHT_PX", 96)
+
+    person_box_gate_enabled: bool = _env_bool("PERSON_BOX_GATE_ENABLED", True)
+    person_box_gate_min_confidence: float = _env_float(("PERSON_BOX_GATE_MIN_CONFIDENCE", "PERSON_TRACKING_MIN_CONFIDENCE"), 0.20)
+    person_box_gate_min_height_px: int = _env_int("PERSON_BOX_GATE_MIN_HEIGHT_PX", 80)
+    person_box_gate_min_width_px: int = _env_int("PERSON_BOX_GATE_MIN_WIDTH_PX", 28)
+    person_box_gate_min_area_ratio: float = _env_float("PERSON_BOX_GATE_MIN_AREA_RATIO", 0.0006)
+    person_box_gate_min_aspect_ratio: float = _env_float("PERSON_BOX_GATE_MIN_ASPECT_RATIO", 0.14)
+    person_box_gate_max_aspect_ratio: float = _env_float("PERSON_BOX_GATE_MAX_ASPECT_RATIO", 1.10)
+    person_box_gate_border_px: int = _env_int("PERSON_BOX_GATE_BORDER_PX", 8)
+    person_box_gate_top_border_px: int = _env_int("PERSON_BOX_GATE_TOP_BORDER_PX", 2)
+    person_box_gate_side_border_px: int = _env_int("PERSON_BOX_GATE_SIDE_BORDER_PX", 6)
+    person_box_gate_reject_side_cropped: bool = _env_bool("PERSON_BOX_GATE_REJECT_SIDE_CROPPED", False)
+    person_box_gate_head_zone_ratio: float = _env_float("PERSON_BOX_GATE_HEAD_ZONE_RATIO", 0.35)
+    person_box_gate_min_head_zone_height_px: int = _env_int("PERSON_BOX_GATE_MIN_HEAD_ZONE_HEIGHT_PX", 36)
+    person_box_gate_min_head_zone_width_px: int = _env_int("PERSON_BOX_GATE_MIN_HEAD_ZONE_WIDTH_PX", 36)
+    person_box_gate_min_body_below_head_ratio: float = _env_float("PERSON_BOX_GATE_MIN_BODY_BELOW_HEAD_RATIO", 0.15)
+    person_box_gate_max_peer_overlap_ratio: float = _env_float("PERSON_BOX_GATE_MAX_PEER_OVERLAP_RATIO", 0.72)
+    person_box_gate_reject_exit_fragments: bool = _env_bool("PERSON_BOX_GATE_REJECT_EXIT_FRAGMENTS", True)
+    person_box_gate_exit_border_px: int = _env_int("PERSON_BOX_GATE_EXIT_BORDER_PX", 24)
+    person_box_gate_exit_fragment_max_width_ratio: float = _env_float("PERSON_BOX_GATE_EXIT_FRAGMENT_MAX_WIDTH_RATIO", 0.22)
+    person_box_gate_exit_fragment_max_area_ratio: float = _env_float("PERSON_BOX_GATE_EXIT_FRAGMENT_MAX_AREA_RATIO", 0.12)
+    person_box_gate_reject_edge_fragments_for_headwear: bool = _env_bool("PERSON_BOX_GATE_REJECT_EDGE_FRAGMENTS_FOR_HEADWEAR", True)
+    person_box_gate_headwear_edge_margin_px: int = _env_int("PERSON_BOX_GATE_HEADWEAR_EDGE_MARGIN_PX", 16)
+    person_box_gate_headwear_edge_safe_margin_px: int = _env_int("PERSON_BOX_GATE_HEADWEAR_EDGE_SAFE_MARGIN_PX", 18)
+    person_box_gate_edge_fragment_max_width_ratio: float = _env_float("PERSON_BOX_GATE_EDGE_FRAGMENT_MAX_WIDTH_RATIO", 0.34)
+    person_box_gate_edge_fragment_max_area_ratio: float = _env_float("PERSON_BOX_GATE_EDGE_FRAGMENT_MAX_AREA_RATIO", 0.18)
+    person_box_gate_edge_fragment_min_aspect_ratio: float = _env_float("PERSON_BOX_GATE_EDGE_FRAGMENT_MIN_ASPECT_RATIO", 0.28)
+    person_box_gate_edge_fragment_center_ratio: float = _env_float("PERSON_BOX_GATE_EDGE_FRAGMENT_CENTER_RATIO", 0.72)
+    person_box_gate_reject_scene_occlusion: bool = _env_bool("PERSON_BOX_GATE_REJECT_SCENE_OCCLUSION", True)
+    person_box_gate_scene_occlusion_zones: str = _env_str("PERSON_BOX_GATE_SCENE_OCCLUSION_ZONES", "")
+    person_box_gate_max_scene_occlusion_ratio: float = _env_float("PERSON_BOX_GATE_MAX_SCENE_OCCLUSION_RATIO", 0.55)
+    person_box_gate_max_headwear_zone_occlusion_ratio: float = _env_float("PERSON_BOX_GATE_MAX_HEADWEAR_ZONE_OCCLUSION_RATIO", 0.45)
+    person_box_gate_scene_occlusion_requires_structural_risk: bool = _env_bool("PERSON_BOX_GATE_SCENE_OCCLUSION_REQUIRES_STRUCTURAL_RISK", True)
+    person_box_gate_min_visible_fraction_after_scene: float = _env_float("PERSON_BOX_GATE_MIN_VISIBLE_FRACTION_AFTER_SCENE", 0.36)
+
+    person_box_gate_reject_internal_occluder_fragments: bool = _env_bool(
+        "PERSON_BOX_GATE_REJECT_INTERNAL_OCCLUDER_FRAGMENTS",
+        True,
+    )
+    person_box_gate_internal_occluder_zones: str = _env_str(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_ZONES",
+        "",
+    )
+    person_box_gate_internal_occluder_min_overlap_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_OVERLAP_RATIO",
+        0.24,
+    )
+    person_box_gate_internal_occluder_min_head_zone_overlap_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_HEAD_ZONE_OVERLAP_RATIO",
+        0.10,
+    )
+    person_box_gate_internal_occluder_max_width_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_WIDTH_RATIO",
+        0.24,
+    )
+    person_box_gate_internal_occluder_max_area_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_AREA_RATIO",
+        0.11,
+    )
+    person_box_gate_internal_occluder_max_aspect_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_ASPECT_RATIO",
+        0.46,
+    )
+    person_box_gate_internal_occluder_min_height_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_HEIGHT_RATIO",
+        0.24,
+    )
+    person_box_gate_internal_occluder_center_x_max_ratio: float = _env_float(
+        "PERSON_BOX_GATE_INTERNAL_OCCLUDER_CENTER_X_MAX_RATIO",
+        0.40,
+    )
+
+    person_box_gate_reject_headless_internal_fragments: bool = _env_bool(
+        "PERSON_BOX_GATE_REJECT_HEADLESS_INTERNAL_FRAGMENTS",
+        True,
+    )
+    person_box_gate_headless_internal_center_x_max_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_CENTER_X_MAX_RATIO",
+        0.42,
+    )
+    person_box_gate_headless_internal_top_y_min_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_TOP_Y_MIN_RATIO",
+        0.03,
+    )
+    person_box_gate_headless_internal_max_width_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_WIDTH_RATIO",
+        0.36,
+    )
+    person_box_gate_headless_internal_max_area_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_AREA_RATIO",
+        0.18,
+    )
+    person_box_gate_headless_internal_max_aspect_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_ASPECT_RATIO",
+        0.70,
+    )
+    person_box_gate_headless_internal_min_height_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_MIN_HEIGHT_RATIO",
+        0.18,
+    )
+    person_box_gate_headless_internal_min_zone_overlap_ratio: float = _env_float(
+        "PERSON_BOX_GATE_HEADLESS_INTERNAL_MIN_ZONE_OVERLAP_RATIO",
+        0.08,
+    )
+
+    person_box_gate_reject_peer_duplicate_fragments: bool = _env_bool(
+        "PERSON_BOX_GATE_REJECT_PEER_DUPLICATE_FRAGMENTS",
+        True,
+    )
+    person_box_gate_peer_duplicate_min_containment_ratio: float = _env_float(
+        "PERSON_BOX_GATE_PEER_DUPLICATE_MIN_CONTAINMENT_RATIO",
+        0.52,
+    )
+    person_box_gate_peer_duplicate_min_iou: float = _env_float(
+        "PERSON_BOX_GATE_PEER_DUPLICATE_MIN_IOU",
+        0.32,
+    )
+    person_box_gate_peer_duplicate_max_area_ratio_to_peer: float = _env_float(
+        "PERSON_BOX_GATE_PEER_DUPLICATE_MAX_AREA_RATIO_TO_PEER",
+        0.78,
+    )
+    person_box_gate_peer_duplicate_max_width_ratio_to_peer: float = _env_float(
+        "PERSON_BOX_GATE_PEER_DUPLICATE_MAX_WIDTH_RATIO_TO_PEER",
+        0.82,
+    )
+
+    person_box_gate_reject_limb_shape_fragments: bool = _env_bool(
+        "PERSON_BOX_GATE_REJECT_LIMB_SHAPE_FRAGMENTS",
+        True,
+    )
+    person_box_gate_limb_shape_horizontal_min_aspect_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_HORIZONTAL_MIN_ASPECT_RATIO",
+        1.35,
+    )
+    person_box_gate_limb_shape_horizontal_max_height_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_HORIZONTAL_MAX_HEIGHT_RATIO",
+        0.30,
+    )
+    person_box_gate_limb_shape_vertical_max_aspect_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MAX_ASPECT_RATIO",
+        0.20,
+    )
+    person_box_gate_limb_shape_vertical_max_width_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MAX_WIDTH_RATIO",
+        0.11,
+    )
+    person_box_gate_limb_shape_vertical_min_height_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MIN_HEIGHT_RATIO",
+        0.18,
+    )
+    person_box_gate_limb_shape_max_area_ratio: float = _env_float(
+        "PERSON_BOX_GATE_LIMB_SHAPE_MAX_AREA_RATIO",
+        0.10,
+    )
+
+    day_person_match_threshold: float = _env_float("DAY_PERSON_MATCH_THRESHOLD", 0.88)
+    day_person_match_margin: float = _env_float("DAY_PERSON_MATCH_MARGIN", 0.15)
+    day_person_min_stable_hits: int = _env_int("DAY_PERSON_MIN_STABLE_HITS", 6)
+
+    day_person_reid_enabled: bool = _env_bool("DAY_PERSON_REID_ENABLED", True)
+    day_person_reid_min_embedding_quality: float = _env_float("DAY_PERSON_REID_MIN_EMBEDDING_QUALITY", 0.55)
+    day_person_reid_match_threshold: float = _env_float("DAY_PERSON_REID_MATCH_THRESHOLD", 0.80)
+    day_person_reid_match_margin: float = _env_float("DAY_PERSON_REID_MATCH_MARGIN", 0.08)
+    day_person_reid_min_stable_hits_before_match: int = _env_int("DAY_PERSON_REID_MIN_STABLE_HITS_BEFORE_MATCH", 3)
+    day_person_reid_gallery_max_vectors: int = _env_int("DAY_PERSON_REID_GALLERY_MAX_VECTORS", 24)
+    day_person_reid_single_candidate_threshold: float = _env_float(
+        "DAY_PERSON_REID_SINGLE_CANDIDATE_THRESHOLD",
+        0.86,
+    )
+    day_person_reid_same_track_check_enabled: bool = _env_bool(
+        (
+            "DAY_PERSON_REID_SAME_TRACK_CHECK_ENABLED",
+            "DAY_PERSON_REID_CONTRADICTION_ENABLED",
+            "DAY_PERSON_REID_STRICT_SAME_TRACK_CHECK",
+        ),
+        True,
+    )
+    day_person_reid_same_track_contradiction_threshold: float = _env_float(
+        (
+            "DAY_PERSON_REID_SAME_TRACK_CONTRADICTION_THRESHOLD",
+            "DAY_PERSON_REID_CONTRADICTION_THRESHOLD",
+        ),
+        0.55,
+    )
+    day_person_reid_update_gallery_on_conflict: bool = _env_bool(
+        "DAY_PERSON_REID_UPDATE_GALLERY_ON_CONFLICT",
+        False,
+    )
+
+    reid_face_weight: float = _env_float("REID_FACE_WEIGHT", 0.65)
+    reid_body_weight: float = _env_float("REID_BODY_WEIGHT", 0.15)
+    reid_position_weight: float = _env_float("REID_POSITION_WEIGHT", 0.08)
+    reid_time_weight: float = _env_float("REID_TIME_WEIGHT", 0.04)
+    reid_size_weight: float = _env_float("REID_SIZE_WEIGHT", 0.08)
+
+    identity_simultaneous_lock_enabled: bool = _env_bool("IDENTITY_SIMULTANEOUS_LOCK_ENABLED", True)
+    identity_confirm_min_valid_hits: int = _env_int("IDENTITY_CONFIRM_MIN_VALID_HITS", 6)
+    identity_tentative_min_valid_hits: int = _env_int("IDENTITY_TENTATIVE_MIN_VALID_HITS", 3)
+    identity_body_only_match_threshold: float = _env_float("IDENTITY_BODY_ONLY_MATCH_THRESHOLD", 0.93)
+    identity_body_only_match_margin: float = _env_float("IDENTITY_BODY_ONLY_MATCH_MARGIN", 0.18)
+    identity_reentry_body_match_threshold: float = _env_float("IDENTITY_REENTRY_BODY_MATCH_THRESHOLD", 0.82)
+    identity_reentry_body_match_margin: float = _env_float("IDENTITY_REENTRY_BODY_MATCH_MARGIN", 0.06)
+    identity_reentry_total_match_threshold: float = _env_float("IDENTITY_REENTRY_TOTAL_MATCH_THRESHOLD", 0.80)
+    identity_final_merge_enabled: bool = _env_bool("IDENTITY_FINAL_MERGE_ENABLED", True)
+    identity_final_merge_body_threshold: float = _env_float("IDENTITY_FINAL_MERGE_BODY_THRESHOLD", 0.86)
+    identity_final_merge_body_margin: float = _env_float("IDENTITY_FINAL_MERGE_BODY_MARGIN", 0.04)
+    identity_body_only_active_match_enabled: bool = _env_bool("IDENTITY_BODY_ONLY_ACTIVE_MATCH_ENABLED", False)
+    identity_face_match_threshold: float = _env_float("IDENTITY_FACE_MATCH_THRESHOLD", 0.62)
+    identity_existing_assignment_min_score: float = _env_float("IDENTITY_EXISTING_ASSIGNMENT_MIN_SCORE", 0.72)
+    identity_conflict_owner_margin: float = _env_float("IDENTITY_CONFLICT_OWNER_MARGIN", 0.10)
+    identity_max_track_gap_sec: float = _env_float("IDENTITY_MAX_TRACK_GAP_SEC", 1.5)
+    identity_show_tentative_in_overlay: bool = _env_bool("IDENTITY_SHOW_TENTATIVE_IN_OVERLAY", False)
+
+    identity_handover_protection_sec: float = _env_float("IDENTITY_HANDOVER_PROTECTION_SEC", 1.2)
+    identity_occlusion_protection_sec: float = _env_float("IDENTITY_OCCLUSION_PROTECTION_SEC", 3.0)
+    identity_exit_candidate_sec: float = _env_float("IDENTITY_EXIT_CANDIDATE_SEC", 3.0)
+    identity_verified_reentry_min_sec: float = _env_float("IDENTITY_VERIFIED_REENTRY_MIN_SEC", 3.0)
+    identity_verified_reentry_max_sec: float = _env_float("IDENTITY_VERIFIED_REENTRY_MAX_SEC", 60.0)
+
+    identity_max_motion_diagonals_per_sec: float = _env_float("IDENTITY_MAX_MOTION_DIAGONALS_PER_SEC", 3.0)
+
+    identity_short_stitch_max_gap_sec: float = _env_float("IDENTITY_SHORT_STITCH_MAX_GAP_SEC", 1.2)
+    identity_short_stitch_min_score: float = _env_float("IDENTITY_SHORT_STITCH_MIN_SCORE", 0.58)
+    identity_short_stitch_min_spatial_score: float = _env_float("IDENTITY_SHORT_STITCH_MIN_SPATIAL_SCORE", 0.55)
+    identity_short_stitch_min_motion_score: float = _env_float("IDENTITY_SHORT_STITCH_MIN_MOTION_SCORE", 0.60)
+    identity_short_stitch_min_size_score: float = _env_float("IDENTITY_SHORT_STITCH_MIN_SIZE_SCORE", 0.40)
+
+    identity_positive_body_threshold: float = _env_float("IDENTITY_POSITIVE_BODY_THRESHOLD", 0.74)
+    identity_positive_face_threshold: float = _env_float("IDENTITY_POSITIVE_FACE_THRESHOLD", 0.58)
+    identity_strong_body_contradiction_threshold: float = _env_float("IDENTITY_STRONG_BODY_CONTRADICTION_THRESHOLD", 0.45)
+    identity_strong_face_contradiction_threshold: float = _env_float("IDENTITY_STRONG_FACE_CONTRADICTION_THRESHOLD", 0.40)
+    identity_appearance_contradiction_min_quality: float = _env_float("IDENTITY_APPEARANCE_CONTRADICTION_MIN_QUALITY", 0.45)
+
+    identity_new_person_quarantine_hits: int = _env_int("IDENTITY_NEW_PERSON_QUARANTINE_HITS", 5)
+    identity_track_person_covisible_lock_enabled: bool = _env_bool("IDENTITY_TRACK_PERSON_COVISIBLE_LOCK_ENABLED", True)
+
+    incident_window_size: int = _env_int("INCIDENT_WINDOW_SIZE", 10)
+    incident_window_seconds: float = _env_float("INCIDENT_WINDOW_SECONDS", 7.0)
+    incident_open_min_valid: int = _env_int("INCIDENT_OPEN_MIN_VALID", 6)
+    incident_open_violation_ratio: float = _env_float("INCIDENT_OPEN_VIOLATION_RATIO", 0.70)
+    incident_open_min_duration_sec: float = _env_float("INCIDENT_OPEN_MIN_DURATION_SEC", 5.0)
+    incident_cooldown_seconds: float = _env_float("INCIDENT_COOLDOWN_SECONDS", 8.0)
+    incident_close_seconds: float = _env_float("INCIDENT_CLOSE_SECONDS", 20.0)
+    incident_signal_window_ttl_seconds: float = _env_float("INCIDENT_SIGNAL_WINDOW_TTL_SECONDS", 120.0)
+    incident_evidence_max_per_case: int = _env_int("INCIDENT_EVIDENCE_MAX_PER_CASE", 5)
+    incident_evidence_min_interval_seconds: float = _env_float("INCIDENT_EVIDENCE_MIN_INTERVAL_SECONDS", 10.0)
+
+    runtime_metrics_enabled: bool = _env_bool("RUNTIME_METRICS_ENABLED", True)
+    runtime_metrics_dir: str = _env_str("RUNTIME_METRICS_DIR", "data/metrics")
+    track_interaction_iou_threshold: float = _env_float("TRACK_INTERACTION_IOU_THRESHOLD", 0.18)
+    track_head_overlap_iou_threshold: float = _env_float("TRACK_HEAD_OVERLAP_IOU_THRESHOLD", 0.05)
+    track_duplicate_iou_threshold: float = _env_float("TRACK_DUPLICATE_IOU_THRESHOLD", 0.55)
+    track_duplicate_containment_threshold: float = _env_float("TRACK_DUPLICATE_CONTAINMENT_THRESHOLD", 0.78)
+    track_duplicate_center_distance_ratio: float = _env_float("TRACK_DUPLICATE_CENTER_DISTANCE_RATIO", 0.42)
+    track_episode_min_promote_hits: int = _env_int("TRACK_EPISODE_MIN_PROMOTE_HITS", 2)
+    track_episode_min_promote_quality: float = _env_float("TRACK_EPISODE_MIN_PROMOTE_QUALITY", 0.40)
+    track_episode_fast_promote_hits: int = _env_int("TRACK_EPISODE_FAST_PROMOTE_HITS", 2)
+    track_episode_fast_promote_quality: float = _env_float("TRACK_EPISODE_FAST_PROMOTE_QUALITY", 0.62)
+    track_episode_min_stable_hits: int = _env_int("TRACK_EPISODE_MIN_STABLE_HITS", 3)
+    track_episode_stability_max_frame_gap: int = _env_int("TRACK_EPISODE_STABILITY_MAX_FRAME_GAP", 2)
+    track_episode_max_center_shift_ratio: float = _env_float("TRACK_EPISODE_MAX_CENTER_SHIFT_RATIO", 0.28)
+    track_episode_max_size_change_ratio: float = _env_float("TRACK_EPISODE_MAX_SIZE_CHANGE_RATIO", 0.45)
+    track_episode_reject_fragment_reasons_for_promotion: tuple[str, ...] = _env_csv(
+        "TRACK_EPISODE_REJECT_FRAGMENT_REASONS_FOR_PROMOTION",
+        (
+            "person_box_rejected_internal_occluder_fragment",
+            "person_box_rejected_headless_internal_fragment",
+            "person_box_rejected_peer_duplicate_fragment",
+            "person_box_rejected_limb_shape_fragment",
+            "person_box_rejected_edge_fragment_for_headwear",
+            "person_box_rejected_exit_fragment",
+            "person_box_rejected_overlap",
+            "candidate_partial_fragment_rejected",
+            "partial_track_suppressed",
+            "border_fragment",
+            "limb_only_or_tiny_fragment",
+            "head_cropped_by_frame_border",
+        ),
+    )
+    track_episode_require_head_for_new: bool = _env_bool("TRACK_EPISODE_REQUIRE_HEAD_FOR_NEW", False)
+    track_episode_short_max_frames: int = _env_int("TRACK_EPISODE_SHORT_MAX_FRAMES", 6)
+    track_episode_rebind_enabled: bool = _env_bool("TRACK_EPISODE_REBIND_ENABLED", True)
+    track_episode_rebind_max_frame_gap: int = _env_int("TRACK_EPISODE_REBIND_MAX_FRAME_GAP", 12)
+    track_episode_rebind_min_score: float = _env_float("TRACK_EPISODE_REBIND_MIN_SCORE", 0.58)
+    track_episode_rebind_max_center_shift_ratio: float = _env_float("TRACK_EPISODE_REBIND_MAX_CENTER_SHIFT_RATIO", 0.70)
+    track_episode_rebind_min_size_similarity: float = _env_float("TRACK_EPISODE_REBIND_MIN_SIZE_SIMILARITY", 0.35)
+    track_episode_prevent_covisible_rebind: bool = _env_bool("TRACK_EPISODE_PREVENT_COVISIBLE_REBIND", True)
+    track_candidate_overlay_enabled: bool = _env_bool("TRACK_CANDIDATE_OVERLAY_ENABLED", True)
+
+    track_diagnostics_enabled: bool = _env_bool("TRACK_DIAGNOSTICS_ENABLED", True)
+    track_diagnostics_max_gap_seconds: float = _env_float("TRACK_DIAGNOSTICS_MAX_GAP_SECONDS", 2.0)
+    track_diagnostics_center_distance_ratio: float = _env_float("TRACK_DIAGNOSTICS_CENTER_DISTANCE_RATIO", 0.55)
+    track_diagnostics_size_similarity_threshold: float = _env_float("TRACK_DIAGNOSTICS_SIZE_SIMILARITY_THRESHOLD", 0.45)
+    track_diagnostics_id_switch_threshold: float = _env_float("TRACK_DIAGNOSTICS_ID_SWITCH_THRESHOLD", 0.58)
+    track_diagnostics_split_threshold: float = _env_float("TRACK_DIAGNOSTICS_SPLIT_THRESHOLD", 0.55)
+    track_diagnostics_merge_iou_threshold: float = _env_float("TRACK_DIAGNOSTICS_MERGE_IOU_THRESHOLD", 0.35)
+    track_diagnostics_merge_containment_threshold: float = _env_float("TRACK_DIAGNOSTICS_MERGE_CONTAINMENT_THRESHOLD", 0.72)
+    track_diagnostics_recent_cache_size: int = _env_int("TRACK_DIAGNOSTICS_RECENT_CACHE_SIZE", 80)
+
+    headwear_model_policy: str = _env_str("HEADWEAR_MODEL_POLICY", "diagnostic_only")
+    headwear_require_promoted_track: bool = _env_bool("HEADWEAR_REQUIRE_PROMOTED_TRACK", True)
+    headwear_incidents_enabled: bool = _env_bool("HEADWEAR_INCIDENTS_ENABLED", False)
+    headwear_debug_save_crops: bool = _env_bool("HEADWEAR_DEBUG_SAVE_CROPS", True)
+    headwear_debug_dir: str = _env_str("HEADWEAR_DEBUG_DIR", "./data/debug/headwear")
+    headwear_debug_max_samples: int = _env_int("HEADWEAR_DEBUG_MAX_SAMPLES", 300)
+    headwear_debug_every_n: int = _env_int("HEADWEAR_DEBUG_EVERY_N", 1)
+    headwear_pre_skip_unusable: bool = _env_bool("HEADWEAR_PRE_SKIP_UNUSABLE", True)
+    headwear_max_crop_aspect_ratio: float = _env_float("HEADWEAR_MAX_CROP_ASPECT_RATIO", 2.20)
+    headwear_min_crop_aspect_ratio: float = _env_float("HEADWEAR_MIN_CROP_ASPECT_RATIO", 0.45)
+    headwear_max_crop_width_to_person_ratio: float = _env_float("HEADWEAR_MAX_CROP_WIDTH_TO_PERSON_RATIO", 0.74)
+    headwear_max_crop_height_to_person_ratio: float = _env_float("HEADWEAR_MAX_CROP_HEIGHT_TO_PERSON_RATIO", 0.36)
+    headwear_detector_mode: str = _env_str("HEADWEAR_DETECTOR_MODE", "placeholder")
+    headwear_model_path: str = _env_str("HEADWEAR_MODEL_PATH", "")
+    headwear_input_width: int = _env_int("HEADWEAR_INPUT_WIDTH", 640)
+    headwear_input_height: int = _env_int("HEADWEAR_INPUT_HEIGHT", 640)
+    headwear_input_resize_mode: str = _env_str("HEADWEAR_INPUT_RESIZE_MODE", "letterbox")
+    headwear_input_letterbox_pad_value: int = _env_int("HEADWEAR_INPUT_LETTERBOX_PAD_VALUE", 114)
+    headwear_classifier_conf_threshold: float = _env_float("HEADWEAR_CLASSIFIER_CONF_THRESHOLD", 0.58)
+    headwear_classifier_margin: float = _env_float("HEADWEAR_CLASSIFIER_MARGIN", 0.10)
+    headwear_detector_conf_threshold: float = _env_float("HEADWEAR_DETECTOR_CONF_THRESHOLD", 0.45)
+    headwear_detector_nms_iou: float = _env_float("HEADWEAR_DETECTOR_NMS_IOU", 0.45)
+    headwear_decision_margin: float = _env_float("HEADWEAR_DECISION_MARGIN", 0.20)
+    headwear_detector_box_format: str = _env_str("HEADWEAR_DETECTOR_BOX_FORMAT", "cxcywh")
+    headwear_classifier_binary_positive_means: str = _env_str(
+        ("HEADWEAR_CLASSIFIER_BINARY_POSITIVE_MEANS", "HEADWEAR_CLASSIFIER_POSITIVE_CLASS_LABEL"),
+        "violation",
+    )
+    headwear_input_normalization_mode: str = _env_str("HEADWEAR_INPUT_NORMALIZATION_MODE", "zero_one")
+    headwear_input_mean: tuple[float, float, float] | None = _env_float_triplet("HEADWEAR_INPUT_MEAN")
+    headwear_input_std: tuple[float, float, float] | None = _env_float_triplet("HEADWEAR_INPUT_STD")
+    headwear_detector_has_objectness: str = _normalize_tristate(_first_env_value("HEADWEAR_DETECTOR_HAS_OBJECTNESS"))
+    headwear_detector_num_classes: int = _env_int("HEADWEAR_DETECTOR_NUM_CLASSES", 0)
+    headwear_class_names: tuple[str, ...] = _env_csv("HEADWEAR_CLASS_NAMES")
+    headwear_compliant_labels: tuple[str, ...] = _env_csv("HEADWEAR_COMPLIANT_LABELS")
+    headwear_violation_labels: tuple[str, ...] = _env_csv("HEADWEAR_VIOLATION_LABELS")
+    headwear_unknown_labels: tuple[str, ...] = _env_csv("HEADWEAR_UNKNOWN_LABELS")
+
+    # Dedicated head detector. This is intentionally separate from the
+    # headwear classifier: person bbox is for tracking, head bbox is for
+    # classifier input.
+    head_detector_mode: str = _env_str("HEAD_DETECTOR_MODE", "disabled")
+    head_detector_model_path: str = _env_str("HEAD_DETECTOR_MODEL_PATH", "")
+    head_detector_conf_threshold: float = _env_float("HEAD_DETECTOR_CONF_THRESHOLD", 0.45)
+    head_detector_iou_threshold: float = _env_float("HEAD_DETECTOR_IOU_THRESHOLD", 0.45)
+    head_detector_run_scope: str = _env_str("HEAD_DETECTOR_RUN_SCOPE", "person_roi")
+    head_detector_input_size: int = _env_int("HEAD_DETECTOR_INPUT_SIZE", 640)
+    head_detector_box_format: str = _env_str("HEAD_DETECTOR_BOX_FORMAT", "cxcywh")
+    head_detector_has_objectness: str = _normalize_tristate(_first_env_value("HEAD_DETECTOR_HAS_OBJECTNESS"))
+    head_detector_num_classes: int = _env_int("HEAD_DETECTOR_NUM_CLASSES", 0)
+    head_detector_class_names: tuple[str, ...] = _env_csv("HEAD_DETECTOR_CLASS_NAMES")
+    head_detector_min_head_width_px: int = _env_int("HEAD_DETECTOR_MIN_HEAD_WIDTH_PX", 8)
+    head_detector_min_head_height_px: int = _env_int("HEAD_DETECTOR_MIN_HEAD_HEIGHT_PX", 8)
+    head_person_association_min_score: float = _env_float("HEAD_PERSON_ASSOCIATION_MIN_SCORE", 0.20)
+    head_person_association_min_inside_ratio: float = _env_float("HEAD_PERSON_ASSOCIATION_MIN_INSIDE_RATIO", 0.50)
+    head_person_association_ambiguity_delta: float = _env_float("HEAD_PERSON_ASSOCIATION_AMBIGUITY_DELTA", 0.08)
+    head_person_association_reject_border_cropped: bool = _env_bool("HEAD_PERSON_ASSOCIATION_REJECT_BORDER_CROPPED", True)
+    allow_legacy_geometry_head_fallback: bool = _env_bool("ALLOW_LEGACY_GEOMETRY_HEAD_FALLBACK", False)
+    legacy_geometry_head_fallback_actionable: bool = _env_bool("LEGACY_GEOMETRY_HEAD_FALLBACK_ACTIONABLE", False)
+
+    face_embedder_mode: str = _env_str("FACE_EMBEDDER_MODE", "auto")
+    face_embedder_prefer_cuda: bool = _env_bool("FACE_EMBEDDER_PREFER_CUDA", False)
+    face_embedder_strict_backend: bool = _env_bool("FACE_EMBEDDER_STRICT_BACKEND", False)
+
+    body_embedder_mode: str = _env_str("BODY_EMBEDDER_MODE", "boxmot")
+    body_embedder_strict_backend: bool = _env_bool("BODY_EMBEDDER_STRICT_BACKEND", False)
+    body_embedding_model_path: str = _env_str("BODY_EMBEDDING_MODEL_PATH", "")
+    body_embedding_input_width: int = _env_int("BODY_EMBEDDING_INPUT_WIDTH", 128)
+    body_embedding_input_height: int = _env_int("BODY_EMBEDDING_INPUT_HEIGHT", 256)
+
+    boxmot_reid_model: str = _env_str("BOXMOT_REID_MODEL", "osnet_x0_25_msmt17.pt")
+    boxmot_reid_weights_path: str = _env_str("BOXMOT_REID_WEIGHTS_PATH", "")
+    boxmot_reid_device: str = _env_str("BOXMOT_REID_DEVICE", "cpu")
+    boxmot_reid_half: bool = _env_bool("BOXMOT_REID_HALF", False)
+    boxmot_reid_strict: bool = _env_bool("BOXMOT_REID_STRICT", True)
+
+    identity_max_day_people: int = _env_int("IDENTITY_MAX_DAY_PEOPLE", 30)
+    identity_auto_merge_enabled: bool = _env_bool("IDENTITY_AUTO_MERGE_ENABLED", True)
+    identity_review_on_conflict: bool = _env_bool("IDENTITY_REVIEW_ON_CONFLICT", True)
+    identity_embedding_gallery_size: int = _env_int("IDENTITY_EMBEDDING_GALLERY_SIZE", 12)
+    identity_create_new_on_uncertain: bool = _env_bool("IDENTITY_CREATE_NEW_ON_UNCERTAIN", True)
+
+    backend_enabled: bool = _env_bool("BACKEND_ENABLED", False)
+    backend_base_url: str = _env_str("BACKEND_BASE_URL", "")
+    backend_timeout_sec: float = _env_float(("BACKEND_TIMEOUT_SEC", "BACKEND_TIMEOUT_SECONDS"), 2.0)
+    backend_incidents_path: str = _env_str("BACKEND_INCIDENTS_PATH", "/internal/vision/incidents")
+    backend_max_retries: int = _env_int("BACKEND_MAX_RETRIES", 2)
+    backend_retry_delay_sec: float = _env_float("BACKEND_RETRY_DELAY_SEC", 0.25)
+    backend_dedup_enabled: bool = _env_bool("BACKEND_DEDUP_ENABLED", True)
+    backend_queue_maxsize: int = _env_int("BACKEND_QUEUE_MAXSIZE", 512)
+    backend_queue_drop_oldest: bool = _env_bool("BACKEND_QUEUE_DROP_OLDEST", True)
+    backend_worker_poll_interval_ms: int = _env_int("BACKEND_WORKER_POLL_INTERVAL_MS", 250)
+
+    def __post_init__(self) -> None:
+        self.source_url = _resolve_path(self.source_url) if self.source_url.strip() else ""
+        self.evidence_dir = _resolve_path(self.evidence_dir)
+        self.processed_video_dir = _resolve_path(self.processed_video_dir)
+        self.person_crop_collection_dir = _resolve_path(self.person_crop_collection_dir)
+
+        self.yolo_model_path = _resolve_path(self.yolo_model_path) if self.yolo_model_path.strip() else ""
+        self.person_onnx_model_path = _resolve_path(self.person_onnx_model_path) if self.person_onnx_model_path.strip() else ""
+        self.person_tracking_tracker_config = (
+            _resolve_path(self.person_tracking_tracker_config)
+            if self.person_tracking_tracker_config.strip() and self.person_tracking_tracker_config not in {"botsort.yaml", "bytetrack.yaml"}
+            else self.person_tracking_tracker_config
+        )
+        self.headwear_model_path = _resolve_path(self.headwear_model_path) if self.headwear_model_path.strip() else ""
+        self.head_detector_model_path = _resolve_path(self.head_detector_model_path) if self.head_detector_model_path.strip() else ""
+        self.body_embedding_model_path = _resolve_path(self.body_embedding_model_path) if self.body_embedding_model_path.strip() else ""
+        self.boxmot_reid_weights_path = _resolve_path(self.boxmot_reid_weights_path) if self.boxmot_reid_weights_path.strip() else ""
+
+    def validate_app_config_or_raise(self) -> None:
+        errors: list[str] = []
+
+        if not self.app_name.strip():
+            errors.append("APP_NAME must not be empty")
+        if not self.app_host.strip():
+            errors.append("APP_HOST must not be empty")
+        if not (1 <= int(self.app_port) <= 65535):
+            errors.append("APP_PORT must be in range [1, 65535]")
+        if self.log_level.strip().upper() not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
+            errors.append("LOG_LEVEL must be one of CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET")
+
+        if errors:
+            raise ValueError("Invalid app configuration: " + "; ".join(errors))
+
+    def validate_runtime_static_config_or_raise(self) -> None:
+        errors: list[str] = []
+
+        if not self.camera_id.strip():
+            errors.append("CAMERA_ID must not be empty")
+        if not self.evidence_dir.strip():
+            errors.append("EVIDENCE_DIR must not be empty")
+        if not self.processed_video_dir.strip():
+            errors.append("PROCESSED_VIDEO_DIR must not be empty")
+
+        if self.startup_source_probe_timeout_sec <= 0:
+            errors.append("STARTUP_SOURCE_PROBE_TIMEOUT_SEC must be > 0")
+        if self.startup_source_probe_poll_interval_ms < 1:
+            errors.append("STARTUP_SOURCE_PROBE_POLL_INTERVAL_MS must be >= 1")
+
+        if self.processed_video_fps <= 0:
+            errors.append("PROCESSED_VIDEO_FPS must be > 0")
+        if self.processed_video_analysis_fps <= 0:
+            errors.append("PROCESSED_VIDEO_ANALYSIS_FPS must be > 0")
+        if self.tracking_fps <= 0:
+            errors.append("TRACKING_FPS must be > 0")
+        if self.headwear_classification_fps <= 0:
+            errors.append("HEADWEAR_CLASSIFICATION_FPS must be > 0")
+        if self.processed_video_status_update_every_frames < 1:
+            errors.append("PROCESSED_VIDEO_STATUS_UPDATE_EVERY_FRAMES must be >= 1")
+        if self.processed_video_max_width < 0:
+            errors.append("PROCESSED_VIDEO_MAX_WIDTH must be >= 0")
+        if self.processed_video_max_seconds < 0:
+            errors.append("PROCESSED_VIDEO_MAX_SECONDS must be >= 0")
+        if len(self.processed_video_fourcc.strip()) != 4:
+            errors.append("PROCESSED_VIDEO_FOURCC must contain exactly 4 characters, for example mp4v")
+
+        if not self.person_crop_collection_dir.strip():
+            errors.append("PERSON_CROP_COLLECTION_DIR must not be empty")
+        if self.person_crop_collection_fps <= 0:
+            errors.append("PERSON_CROP_COLLECTION_FPS must be > 0")
+        if self.person_crop_collection_idle_fps <= 0:
+            errors.append("PERSON_CROP_COLLECTION_IDLE_FPS must be > 0")
+        if self.person_crop_collection_active_fps <= 0:
+            errors.append("PERSON_CROP_COLLECTION_ACTIVE_FPS must be > 0")
+        if self.person_crop_collection_active_hold_seconds < 0:
+            errors.append("PERSON_CROP_COLLECTION_ACTIVE_HOLD_SECONDS must be >= 0")
+        if self.person_crop_collection_max_width < 0:
+            errors.append("PERSON_CROP_COLLECTION_MAX_WIDTH must be >= 0")
+        if self.person_crop_collection_max_samples < 0:
+            errors.append("PERSON_CROP_COLLECTION_MAX_SAMPLES must be >= 0")
+        if not (1 <= int(self.person_crop_collection_jpeg_quality) <= 100):
+            errors.append("PERSON_CROP_COLLECTION_JPEG_QUALITY must be in [1, 100]")
+
+        if not _in_unit_interval(self.min_quality_score):
+            errors.append("MIN_QUALITY_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.max_occlusion_ratio):
+            errors.append("MAX_OCCLUSION_RATIO must be in [0, 1]")
+        if self.crop_border_px < 0:
+            errors.append("CROP_BORDER_PX must be >= 0")
+        if self.min_bbox_area_ratio <= 0:
+            errors.append("MIN_BBOX_AREA_RATIO must be > 0")
+        if self.min_bbox_height_px <= 0:
+            errors.append("MIN_BBOX_HEIGHT_PX must be > 0")
+
+        if not _in_unit_interval(self.person_box_gate_min_confidence):
+            errors.append("PERSON_BOX_GATE_MIN_CONFIDENCE must be in [0, 1]")
+        if self.person_box_gate_min_height_px < 1:
+            errors.append("PERSON_BOX_GATE_MIN_HEIGHT_PX must be >= 1")
+        if self.person_box_gate_min_width_px < 1:
+            errors.append("PERSON_BOX_GATE_MIN_WIDTH_PX must be >= 1")
+        if self.person_box_gate_min_area_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_MIN_AREA_RATIO must be > 0")
+        if self.person_box_gate_min_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_MIN_ASPECT_RATIO must be > 0")
+        if self.person_box_gate_max_aspect_ratio <= self.person_box_gate_min_aspect_ratio:
+            errors.append("PERSON_BOX_GATE_MAX_ASPECT_RATIO must be > PERSON_BOX_GATE_MIN_ASPECT_RATIO")
+        if self.person_box_gate_border_px < 0:
+            errors.append("PERSON_BOX_GATE_BORDER_PX must be >= 0")
+        if self.person_box_gate_top_border_px < 0:
+            errors.append("PERSON_BOX_GATE_TOP_BORDER_PX must be >= 0")
+        if self.person_box_gate_side_border_px < 0:
+            errors.append("PERSON_BOX_GATE_SIDE_BORDER_PX must be >= 0")
+        if not 0.18 <= self.person_box_gate_head_zone_ratio <= 0.50:
+            errors.append("PERSON_BOX_GATE_HEAD_ZONE_RATIO must be in [0.18, 0.50]")
+        if self.person_box_gate_min_head_zone_height_px < 1:
+            errors.append("PERSON_BOX_GATE_MIN_HEAD_ZONE_HEIGHT_PX must be >= 1")
+        if self.person_box_gate_min_head_zone_width_px < 1:
+            errors.append("PERSON_BOX_GATE_MIN_HEAD_ZONE_WIDTH_PX must be >= 1")
+        if not _in_unit_interval(self.person_box_gate_min_body_below_head_ratio):
+            errors.append("PERSON_BOX_GATE_MIN_BODY_BELOW_HEAD_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_max_peer_overlap_ratio):
+            errors.append("PERSON_BOX_GATE_MAX_PEER_OVERLAP_RATIO must be in [0, 1]")
+        if self.person_box_gate_exit_border_px < 0:
+            errors.append("PERSON_BOX_GATE_EXIT_BORDER_PX must be >= 0")
+        if not _in_unit_interval(self.person_box_gate_exit_fragment_max_width_ratio):
+            errors.append("PERSON_BOX_GATE_EXIT_FRAGMENT_MAX_WIDTH_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_exit_fragment_max_area_ratio):
+            errors.append("PERSON_BOX_GATE_EXIT_FRAGMENT_MAX_AREA_RATIO must be in [0, 1]")
+        if self.person_box_gate_headwear_edge_margin_px < 0:
+            errors.append("PERSON_BOX_GATE_HEADWEAR_EDGE_MARGIN_PX must be >= 0")
+        if self.person_box_gate_headwear_edge_safe_margin_px < 0:
+            errors.append("PERSON_BOX_GATE_HEADWEAR_EDGE_SAFE_MARGIN_PX must be >= 0")
+        if not _in_unit_interval(self.person_box_gate_edge_fragment_max_width_ratio):
+            errors.append("PERSON_BOX_GATE_EDGE_FRAGMENT_MAX_WIDTH_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_edge_fragment_max_area_ratio):
+            errors.append("PERSON_BOX_GATE_EDGE_FRAGMENT_MAX_AREA_RATIO must be in [0, 1]")
+        if self.person_box_gate_edge_fragment_min_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_EDGE_FRAGMENT_MIN_ASPECT_RATIO must be > 0")
+        if not 0.50 <= self.person_box_gate_edge_fragment_center_ratio <= 0.98:
+            errors.append("PERSON_BOX_GATE_EDGE_FRAGMENT_CENTER_RATIO must be in [0.50, 0.98]")
+        if not _in_unit_interval(self.person_box_gate_max_scene_occlusion_ratio):
+            errors.append("PERSON_BOX_GATE_MAX_SCENE_OCCLUSION_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_max_headwear_zone_occlusion_ratio):
+            errors.append("PERSON_BOX_GATE_MAX_HEADWEAR_ZONE_OCCLUSION_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_min_visible_fraction_after_scene):
+            errors.append("PERSON_BOX_GATE_MIN_VISIBLE_FRACTION_AFTER_SCENE must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_min_overlap_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_OVERLAP_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_min_head_zone_overlap_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_HEAD_ZONE_OVERLAP_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_max_width_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_WIDTH_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_max_area_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_AREA_RATIO must be in [0, 1]")
+        if self.person_box_gate_internal_occluder_max_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MAX_ASPECT_RATIO must be > 0")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_min_height_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_MIN_HEIGHT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_internal_occluder_center_x_max_ratio):
+            errors.append("PERSON_BOX_GATE_INTERNAL_OCCLUDER_CENTER_X_MAX_RATIO must be in [0, 1]")
+
+        if not _in_unit_interval(self.person_box_gate_headless_internal_center_x_max_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_CENTER_X_MAX_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_headless_internal_top_y_min_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_TOP_Y_MIN_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_headless_internal_max_width_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_WIDTH_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_headless_internal_max_area_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_AREA_RATIO must be in [0, 1]")
+        if self.person_box_gate_headless_internal_max_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_MAX_ASPECT_RATIO must be > 0")
+        if not _in_unit_interval(self.person_box_gate_headless_internal_min_height_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_MIN_HEIGHT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_headless_internal_min_zone_overlap_ratio):
+            errors.append("PERSON_BOX_GATE_HEADLESS_INTERNAL_MIN_ZONE_OVERLAP_RATIO must be in [0, 1]")
+
+        if not _in_unit_interval(self.person_box_gate_peer_duplicate_min_containment_ratio):
+            errors.append("PERSON_BOX_GATE_PEER_DUPLICATE_MIN_CONTAINMENT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_peer_duplicate_min_iou):
+            errors.append("PERSON_BOX_GATE_PEER_DUPLICATE_MIN_IOU must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_peer_duplicate_max_area_ratio_to_peer):
+            errors.append("PERSON_BOX_GATE_PEER_DUPLICATE_MAX_AREA_RATIO_TO_PEER must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_peer_duplicate_max_width_ratio_to_peer):
+            errors.append("PERSON_BOX_GATE_PEER_DUPLICATE_MAX_WIDTH_RATIO_TO_PEER must be in [0, 1]")
+
+        if self.person_box_gate_limb_shape_horizontal_min_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_HORIZONTAL_MIN_ASPECT_RATIO must be > 0")
+        if not _in_unit_interval(self.person_box_gate_limb_shape_horizontal_max_height_ratio):
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_HORIZONTAL_MAX_HEIGHT_RATIO must be in [0, 1]")
+        if self.person_box_gate_limb_shape_vertical_max_aspect_ratio <= 0:
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MAX_ASPECT_RATIO must be > 0")
+        if not _in_unit_interval(self.person_box_gate_limb_shape_vertical_max_width_ratio):
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MAX_WIDTH_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_limb_shape_vertical_min_height_ratio):
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_VERTICAL_MIN_HEIGHT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.person_box_gate_limb_shape_max_area_ratio):
+            errors.append("PERSON_BOX_GATE_LIMB_SHAPE_MAX_AREA_RATIO must be in [0, 1]")
+
+        if not _in_unit_interval(self.tracker_iou_threshold):
+            errors.append("TRACKER_IOU_THRESHOLD must be in [0, 1]")
+        if self.tracker_max_age_frames < 1:
+            errors.append("TRACKER_MAX_AGE_FRAMES must be >= 1")
+        if self.tracker_min_hits < 1:
+            errors.append("TRACKER_MIN_HITS must be >= 1")
+        if not _in_unit_interval(self.tracker_match_threshold):
+            errors.append("TRACKER_MATCH_THRESHOLD must be in [0, 1]")
+
+        if not _in_unit_interval(self.day_person_match_threshold):
+            errors.append("DAY_PERSON_MATCH_THRESHOLD must be in [0, 1]")
+        if self.day_person_match_margin < 0:
+            errors.append("DAY_PERSON_MATCH_MARGIN must be >= 0")
+        if self.day_person_min_stable_hits < 1:
+            errors.append("DAY_PERSON_MIN_STABLE_HITS must be >= 1")
+
+        if not _in_unit_interval(self.day_person_reid_min_embedding_quality):
+            errors.append("DAY_PERSON_REID_MIN_EMBEDDING_QUALITY must be in [0, 1]")
+        if not _in_unit_interval(self.day_person_reid_match_threshold):
+            errors.append("DAY_PERSON_REID_MATCH_THRESHOLD must be in [0, 1]")
+        if self.day_person_reid_match_margin < 0:
+            errors.append("DAY_PERSON_REID_MATCH_MARGIN must be >= 0")
+        if self.day_person_reid_min_stable_hits_before_match < 1:
+            errors.append("DAY_PERSON_REID_MIN_STABLE_HITS_BEFORE_MATCH must be >= 1")
+        if self.day_person_reid_gallery_max_vectors < 1:
+            errors.append("DAY_PERSON_REID_GALLERY_MAX_VECTORS must be >= 1")
+        if not _in_unit_interval(self.day_person_reid_single_candidate_threshold):
+            errors.append("DAY_PERSON_REID_SINGLE_CANDIDATE_THRESHOLD must be in [0, 1]")
+        if self.day_person_reid_single_candidate_threshold < self.day_person_reid_match_threshold:
+            errors.append(
+                "DAY_PERSON_REID_SINGLE_CANDIDATE_THRESHOLD must be >= DAY_PERSON_REID_MATCH_THRESHOLD"
+            )
+        if not _in_unit_interval(self.day_person_reid_same_track_contradiction_threshold):
+            errors.append("DAY_PERSON_REID_SAME_TRACK_CONTRADICTION_THRESHOLD must be in [0, 1]")
+
+        if self.identity_tentative_min_valid_hits < 1:
+            errors.append("IDENTITY_TENTATIVE_MIN_VALID_HITS must be >= 1")
+        if self.identity_confirm_min_valid_hits < self.identity_tentative_min_valid_hits:
+            errors.append("IDENTITY_CONFIRM_MIN_VALID_HITS must be >= IDENTITY_TENTATIVE_MIN_VALID_HITS")
+        if not _in_unit_interval(self.identity_body_only_match_threshold):
+            errors.append("IDENTITY_BODY_ONLY_MATCH_THRESHOLD must be in [0, 1]")
+        if self.identity_body_only_match_margin < 0:
+            errors.append("IDENTITY_BODY_ONLY_MATCH_MARGIN must be >= 0")
+        if not _in_unit_interval(self.identity_reentry_body_match_threshold):
+            errors.append("IDENTITY_REENTRY_BODY_MATCH_THRESHOLD must be in [0, 1]")
+        if self.identity_reentry_body_match_margin < 0:
+            errors.append("IDENTITY_REENTRY_BODY_MATCH_MARGIN must be >= 0")
+        if not _in_unit_interval(self.identity_reentry_total_match_threshold):
+            errors.append("IDENTITY_REENTRY_TOTAL_MATCH_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_final_merge_body_threshold):
+            errors.append("IDENTITY_FINAL_MERGE_BODY_THRESHOLD must be in [0, 1]")
+        if self.identity_final_merge_body_margin < 0:
+            errors.append("IDENTITY_FINAL_MERGE_BODY_MARGIN must be >= 0")
+        if not _in_unit_interval(self.identity_face_match_threshold):
+            errors.append("IDENTITY_FACE_MATCH_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_existing_assignment_min_score):
+            errors.append("IDENTITY_EXISTING_ASSIGNMENT_MIN_SCORE must be in [0, 1]")
+        if self.identity_conflict_owner_margin < 0:
+            errors.append("IDENTITY_CONFLICT_OWNER_MARGIN must be >= 0")
+        if self.identity_max_track_gap_sec < 0:
+            errors.append("IDENTITY_MAX_TRACK_GAP_SEC must be >= 0")
+
+        if self.identity_handover_protection_sec < 0:
+            errors.append("IDENTITY_HANDOVER_PROTECTION_SEC must be >= 0")
+        if self.identity_occlusion_protection_sec < 0:
+            errors.append("IDENTITY_OCCLUSION_PROTECTION_SEC must be >= 0")
+        if self.identity_exit_candidate_sec < 0:
+            errors.append("IDENTITY_EXIT_CANDIDATE_SEC must be >= 0")
+        if self.identity_verified_reentry_min_sec < 0:
+            errors.append("IDENTITY_VERIFIED_REENTRY_MIN_SEC must be >= 0")
+        if self.identity_verified_reentry_max_sec < self.identity_verified_reentry_min_sec:
+            errors.append("IDENTITY_VERIFIED_REENTRY_MAX_SEC must be >= IDENTITY_VERIFIED_REENTRY_MIN_SEC")
+        if self.identity_max_motion_diagonals_per_sec <= 0:
+            errors.append("IDENTITY_MAX_MOTION_DIAGONALS_PER_SEC must be > 0")
+        if self.identity_short_stitch_max_gap_sec < 0:
+            errors.append("IDENTITY_SHORT_STITCH_MAX_GAP_SEC must be >= 0")
+        if not _in_unit_interval(self.identity_short_stitch_min_score):
+            errors.append("IDENTITY_SHORT_STITCH_MIN_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.identity_short_stitch_min_spatial_score):
+            errors.append("IDENTITY_SHORT_STITCH_MIN_SPATIAL_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.identity_short_stitch_min_motion_score):
+            errors.append("IDENTITY_SHORT_STITCH_MIN_MOTION_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.identity_short_stitch_min_size_score):
+            errors.append("IDENTITY_SHORT_STITCH_MIN_SIZE_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.identity_positive_body_threshold):
+            errors.append("IDENTITY_POSITIVE_BODY_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_positive_face_threshold):
+            errors.append("IDENTITY_POSITIVE_FACE_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_strong_body_contradiction_threshold):
+            errors.append("IDENTITY_STRONG_BODY_CONTRADICTION_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_strong_face_contradiction_threshold):
+            errors.append("IDENTITY_STRONG_FACE_CONTRADICTION_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.identity_appearance_contradiction_min_quality):
+            errors.append("IDENTITY_APPEARANCE_CONTRADICTION_MIN_QUALITY must be in [0, 1]")
+        if self.identity_new_person_quarantine_hits < 1:
+            errors.append("IDENTITY_NEW_PERSON_QUARANTINE_HITS must be >= 1")
+
+        if self.incident_window_size < 1:
+            errors.append("INCIDENT_WINDOW_SIZE must be >= 1")
+        if self.incident_window_seconds <= 0:
+            errors.append("INCIDENT_WINDOW_SECONDS must be > 0")
+        if self.incident_open_min_valid < 1:
+            errors.append("INCIDENT_OPEN_MIN_VALID must be >= 1")
+        if not _in_unit_interval(self.incident_open_violation_ratio):
+            errors.append("INCIDENT_OPEN_VIOLATION_RATIO must be in [0, 1]")
+        if self.incident_open_min_duration_sec < 0:
+            errors.append("INCIDENT_OPEN_MIN_DURATION_SEC must be >= 0")
+        if self.incident_cooldown_seconds < 0:
+            errors.append("INCIDENT_COOLDOWN_SECONDS must be >= 0")
+        if self.incident_close_seconds < 0:
+            errors.append("INCIDENT_CLOSE_SECONDS must be >= 0")
+        if self.incident_signal_window_ttl_seconds <= 0:
+            errors.append("INCIDENT_SIGNAL_WINDOW_TTL_SECONDS must be > 0")
+        if not _in_unit_interval(self.track_interaction_iou_threshold):
+            errors.append("TRACK_INTERACTION_IOU_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_head_overlap_iou_threshold):
+            errors.append("TRACK_HEAD_OVERLAP_IOU_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_duplicate_iou_threshold):
+            errors.append("TRACK_DUPLICATE_IOU_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_duplicate_containment_threshold):
+            errors.append("TRACK_DUPLICATE_CONTAINMENT_THRESHOLD must be in [0, 1]")
+        if self.track_duplicate_center_distance_ratio < 0:
+            errors.append("TRACK_DUPLICATE_CENTER_DISTANCE_RATIO must be >= 0")
+        if self.track_episode_min_promote_hits < 1:
+            errors.append("TRACK_EPISODE_MIN_PROMOTE_HITS must be >= 1")
+        if not _in_unit_interval(self.track_episode_min_promote_quality):
+            errors.append("TRACK_EPISODE_MIN_PROMOTE_QUALITY must be in [0, 1]")
+        if self.track_episode_fast_promote_hits < 1:
+            errors.append("TRACK_EPISODE_FAST_PROMOTE_HITS must be >= 1")
+        if not _in_unit_interval(self.track_episode_fast_promote_quality):
+            errors.append("TRACK_EPISODE_FAST_PROMOTE_QUALITY must be in [0, 1]")
+        if self.track_episode_min_stable_hits < 1:
+            errors.append("TRACK_EPISODE_MIN_STABLE_HITS must be >= 1")
+        if self.track_episode_stability_max_frame_gap < 1:
+            errors.append("TRACK_EPISODE_STABILITY_MAX_FRAME_GAP must be >= 1")
+        if not _in_unit_interval(self.track_episode_max_center_shift_ratio):
+            errors.append("TRACK_EPISODE_MAX_CENTER_SHIFT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.track_episode_max_size_change_ratio):
+            errors.append("TRACK_EPISODE_MAX_SIZE_CHANGE_RATIO must be in [0, 1]")
+        if self.track_episode_short_max_frames < 1:
+            errors.append("TRACK_EPISODE_SHORT_MAX_FRAMES must be >= 1")
+        if self.track_episode_rebind_max_frame_gap < 0:
+            errors.append("TRACK_EPISODE_REBIND_MAX_FRAME_GAP must be >= 0")
+        if not _in_unit_interval(self.track_episode_rebind_min_score):
+            errors.append("TRACK_EPISODE_REBIND_MIN_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.track_episode_rebind_max_center_shift_ratio):
+            errors.append("TRACK_EPISODE_REBIND_MAX_CENTER_SHIFT_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.track_episode_rebind_min_size_similarity):
+            errors.append("TRACK_EPISODE_REBIND_MIN_SIZE_SIMILARITY must be in [0, 1]")
+        if self.track_diagnostics_max_gap_seconds <= 0:
+            errors.append("TRACK_DIAGNOSTICS_MAX_GAP_SECONDS must be > 0")
+        if self.track_diagnostics_center_distance_ratio <= 0:
+            errors.append("TRACK_DIAGNOSTICS_CENTER_DISTANCE_RATIO must be > 0")
+        if self.track_diagnostics_recent_cache_size < 1:
+            errors.append("TRACK_DIAGNOSTICS_RECENT_CACHE_SIZE must be >= 1")
+        if not _in_unit_interval(self.track_diagnostics_size_similarity_threshold):
+            errors.append("TRACK_DIAGNOSTICS_SIZE_SIMILARITY_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_diagnostics_id_switch_threshold):
+            errors.append("TRACK_DIAGNOSTICS_ID_SWITCH_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_diagnostics_split_threshold):
+            errors.append("TRACK_DIAGNOSTICS_SPLIT_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_diagnostics_merge_iou_threshold):
+            errors.append("TRACK_DIAGNOSTICS_MERGE_IOU_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.track_diagnostics_merge_containment_threshold):
+            errors.append("TRACK_DIAGNOSTICS_MERGE_CONTAINMENT_THRESHOLD must be in [0, 1]")
+        if self.headwear_model_policy.strip().lower() not in {"diagnostic_only", "production", "disabled"}:
+            errors.append("HEADWEAR_MODEL_POLICY must be diagnostic_only/production/disabled")
+        if self.headwear_debug_max_samples < 0:
+            errors.append("HEADWEAR_DEBUG_MAX_SAMPLES must be >= 0")
+        if self.headwear_debug_every_n < 1:
+            errors.append("HEADWEAR_DEBUG_EVERY_N must be >= 1")
+        if self.headwear_min_crop_aspect_ratio <= 0:
+            errors.append("HEADWEAR_MIN_CROP_ASPECT_RATIO must be > 0")
+        if self.headwear_max_crop_aspect_ratio <= self.headwear_min_crop_aspect_ratio:
+            errors.append("HEADWEAR_MAX_CROP_ASPECT_RATIO must be > HEADWEAR_MIN_CROP_ASPECT_RATIO")
+        if not _in_unit_interval(self.headwear_max_crop_width_to_person_ratio):
+            errors.append("HEADWEAR_MAX_CROP_WIDTH_TO_PERSON_RATIO must be in [0, 1]")
+        if not _in_unit_interval(self.headwear_max_crop_height_to_person_ratio):
+            errors.append("HEADWEAR_MAX_CROP_HEIGHT_TO_PERSON_RATIO must be in [0, 1]")
+
+        if self.person_detector_mode.strip().lower() not in {
+            "auto",
+            "placeholder",
+            "ultralytics",
+            "ultralytics_yolo",
+            "yolo",
+            "onnx",
+            "onnx_detector",
+        }:
+            errors.append("PERSON_DETECTOR_MODE has unsupported value")
+        if self.person_onnx_input_width <= 0 or self.person_onnx_input_height <= 0:
+            errors.append("PERSON_ONNX_INPUT_WIDTH and PERSON_ONNX_INPUT_HEIGHT must be > 0")
+        if self.person_detector_box_format.strip().lower() not in {"cxcywh", "xyxy"}:
+            errors.append("PERSON_DETECTOR_BOX_FORMAT must be cxcywh or xyxy")
+        if self.person_detector_has_objectness not in {"auto", "true", "false"}:
+            errors.append("PERSON_DETECTOR_HAS_OBJECTNESS must be auto/true/false")
+        if self.person_detector_num_classes < 0:
+            errors.append("PERSON_DETECTOR_NUM_CLASSES must be >= 0")
+
+        if self.person_tracking_backend.strip().lower() not in {
+            "ultralytics",
+            "yolo",
+            "yolo_track",
+            "botsort",
+            "bytetrack",
+            "development_simple",
+            "simple",
+            "dev_simple",
+            "test",
+            "disabled",
+            "none",
+            "off",
+        }:
+            errors.append("PERSON_TRACKING_BACKEND has unsupported value")
+        if not _in_unit_interval(self.person_tracking_min_confidence):
+            errors.append("PERSON_TRACKING_MIN_CONFIDENCE must be in [0, 1]")
+        if self.person_tracking_person_class_id < 0:
+            errors.append("PERSON_TRACKING_PERSON_CLASS_ID must be >= 0")
+        if self.person_tracking_require_external and self.person_tracking_backend.strip().lower() in {
+            "development_simple",
+            "simple",
+            "dev_simple",
+            "test",
+        }:
+            errors.append(
+                "PERSON_TRACKING_REQUIRE_EXTERNAL=true does not allow development_simple tracking backend"
+            )
+        if (
+            self.person_tracking_backend.strip().lower() in {"development_simple", "simple", "dev_simple", "test"}
+            and not self.person_tracking_allow_dev_simple
+        ):
+            errors.append("PERSON_TRACKING_ALLOW_DEV_SIMPLE=true is required for development_simple tracking backend")
+
+        for raw_person_class_id in self.person_class_ids:
+            try:
+                parsed = int(raw_person_class_id)
+                if parsed < 0:
+                    errors.append("PERSON_CLASS_IDS must contain only non-negative integer values")
+                    break
+            except Exception:
+                errors.append("PERSON_CLASS_IDS must contain only integer values")
+                break
+
+        if self.headwear_detector_mode.strip().lower() not in {"placeholder", "onnx_classifier", "onnx_detector"}:
+            errors.append("HEADWEAR_DETECTOR_MODE has unsupported value")
+        if self.headwear_input_width <= 0 or self.headwear_input_height <= 0:
+            errors.append("HEADWEAR_INPUT_WIDTH and HEADWEAR_INPUT_HEIGHT must be > 0")
+        if self.headwear_input_resize_mode.strip().lower() not in {"letterbox", "stretch"}:
+            errors.append("HEADWEAR_INPUT_RESIZE_MODE must be one of: letterbox, stretch")
+        if not (0 <= int(self.headwear_input_letterbox_pad_value) <= 255):
+            errors.append("HEADWEAR_INPUT_LETTERBOX_PAD_VALUE must be in range [0, 255]")
+        if not _in_unit_interval(self.headwear_classifier_conf_threshold):
+            errors.append("HEADWEAR_CLASSIFIER_CONF_THRESHOLD must be in [0, 1]")
+        if self.headwear_classifier_margin < 0:
+            errors.append("HEADWEAR_CLASSIFIER_MARGIN must be >= 0")
+        if not _in_unit_interval(self.headwear_detector_conf_threshold):
+            errors.append("HEADWEAR_DETECTOR_CONF_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.headwear_detector_nms_iou):
+            errors.append("HEADWEAR_DETECTOR_NMS_IOU must be in [0, 1]")
+        if self.headwear_decision_margin < 0:
+            errors.append("HEADWEAR_DECISION_MARGIN must be >= 0")
+        if self.headwear_detector_box_format.strip().lower() not in {"cxcywh", "xyxy"}:
+            errors.append("HEADWEAR_DETECTOR_BOX_FORMAT must be cxcywh or xyxy")
+        if self.headwear_detector_has_objectness not in {"auto", "true", "false"}:
+            errors.append("HEADWEAR_DETECTOR_HAS_OBJECTNESS must be auto/true/false")
+        if self.headwear_detector_num_classes < 0:
+            errors.append("HEADWEAR_DETECTOR_NUM_CLASSES must be >= 0")
+
+        if self.head_detector_mode.strip().lower() not in {"disabled", "mock", "legacy", "legacy_geometry", "geometry", "onnx", "onnx_detector", "ultralytics"}:
+            errors.append("HEAD_DETECTOR_MODE has unsupported value")
+        if self.head_detector_run_scope.strip().lower() not in {"person_roi", "full_frame", "hybrid"}:
+            errors.append("HEAD_DETECTOR_RUN_SCOPE must be one of: person_roi, full_frame, hybrid")
+        if not _in_unit_interval(self.head_detector_conf_threshold):
+            errors.append("HEAD_DETECTOR_CONF_THRESHOLD must be in [0, 1]")
+        if not _in_unit_interval(self.head_detector_iou_threshold):
+            errors.append("HEAD_DETECTOR_IOU_THRESHOLD must be in [0, 1]")
+        if self.head_detector_input_size < 16:
+            errors.append("HEAD_DETECTOR_INPUT_SIZE must be >= 16")
+        if self.head_detector_box_format.strip().lower() not in {"cxcywh", "xyxy"}:
+            errors.append("HEAD_DETECTOR_BOX_FORMAT must be cxcywh or xyxy")
+        if self.head_detector_has_objectness not in {"auto", "true", "false"}:
+            errors.append("HEAD_DETECTOR_HAS_OBJECTNESS must be auto/true/false")
+        if self.head_detector_num_classes < 0:
+            errors.append("HEAD_DETECTOR_NUM_CLASSES must be >= 0")
+        if self.head_detector_min_head_width_px < 1 or self.head_detector_min_head_height_px < 1:
+            errors.append("HEAD_DETECTOR_MIN_HEAD_WIDTH_PX and HEAD_DETECTOR_MIN_HEAD_HEIGHT_PX must be >= 1")
+        if not _in_unit_interval(self.head_person_association_min_score):
+            errors.append("HEAD_PERSON_ASSOCIATION_MIN_SCORE must be in [0, 1]")
+        if not _in_unit_interval(self.head_person_association_min_inside_ratio):
+            errors.append("HEAD_PERSON_ASSOCIATION_MIN_INSIDE_RATIO must be in [0, 1]")
+        if self.head_person_association_ambiguity_delta < 0:
+            errors.append("HEAD_PERSON_ASSOCIATION_AMBIGUITY_DELTA must be >= 0")
+        if self.headwear_input_normalization_mode.strip().lower() not in {"none", "zero_one", "imagenet", "custom"}:
+            errors.append("HEADWEAR_INPUT_NORMALIZATION_MODE must be none/zero_one/imagenet/custom")
+        if self.headwear_classifier_binary_positive_means.strip().lower() not in {"violation", "compliant"}:
+            errors.append("HEADWEAR_CLASSIFIER_BINARY_POSITIVE_MEANS must be violation/compliant")
+
+        if self.face_embedder_mode.strip().lower() not in {"auto", "insightface", "none"}:
+            errors.append("FACE_EMBEDDER_MODE must be auto/insightface/none")
+        if self.body_embedder_mode.strip().lower() not in {
+            "auto",
+            "onnx",
+            "handcrafted",
+            "boxmot",
+            "boxmot_osnet",
+            "osnet",
+            "neural_reid",
+        }:
+            errors.append("BODY_EMBEDDER_MODE must be auto/onnx/handcrafted/boxmot/boxmot_osnet/osnet/neural_reid")
+        if self.body_embedding_input_width <= 0 or self.body_embedding_input_height <= 0:
+            errors.append("BODY_EMBEDDING_INPUT_WIDTH and BODY_EMBEDDING_INPUT_HEIGHT must be > 0")
+        if self.identity_max_day_people < 1:
+            errors.append("IDENTITY_MAX_DAY_PEOPLE must be >= 1")
+        if self.identity_embedding_gallery_size < 1:
+            errors.append("IDENTITY_EMBEDDING_GALLERY_SIZE must be >= 1")
+
+        if self.evidence_jpeg_quality < 1 or self.evidence_jpeg_quality > 100:
+            errors.append("EVIDENCE_JPEG_QUALITY must be in [1, 100]")
+        if self.evidence_retention_days < 1:
+            errors.append("EVIDENCE_RETENTION_DAYS must be >= 1")
+        if self.evidence_cleanup_interval_sec <= 0:
+            errors.append("EVIDENCE_CLEANUP_INTERVAL_SEC must be > 0")
+
+        if self.backend_max_retries < 0:
+            errors.append("BACKEND_MAX_RETRIES must be >= 0")
+        if self.backend_retry_delay_sec < 0:
+            errors.append("BACKEND_RETRY_DELAY_SEC must be >= 0")
+        if self.backend_queue_maxsize < 1:
+            errors.append("BACKEND_QUEUE_MAXSIZE must be >= 1")
+        if self.backend_worker_poll_interval_ms < 1:
+            errors.append("BACKEND_WORKER_POLL_INTERVAL_MS must be >= 1")
+        if self.backend_enabled:
+            if not self.backend_base_url.strip():
+                errors.append("BACKEND_BASE_URL must not be empty when BACKEND_ENABLED=true")
+            if self.backend_timeout_sec <= 0:
+                errors.append("BACKEND_TIMEOUT_SEC must be > 0 when BACKEND_ENABLED=true")
+
+        reid_weight_sum = (
+            self.reid_face_weight
+            + self.reid_body_weight
+            + self.reid_position_weight
+            + self.reid_time_weight
+            + self.reid_size_weight
+        )
+        if reid_weight_sum <= 0:
+            errors.append("Sum of REID_*_WEIGHT values must be > 0")
+
+        for name, value in (
+            ("REID_FACE_WEIGHT", self.reid_face_weight),
+            ("REID_BODY_WEIGHT", self.reid_body_weight),
+            ("REID_POSITION_WEIGHT", self.reid_position_weight),
+            ("REID_TIME_WEIGHT", self.reid_time_weight),
+            ("REID_SIZE_WEIGHT", self.reid_size_weight),
+        ):
+            if value < 0:
+                errors.append(f"{name} must be >= 0")
+
+        if errors:
+            raise ValueError("Invalid runtime configuration: " + "; ".join(errors))
+
+    def validate_runtime_launch_or_raise(
+        self,
+        *,
+        source_url: str,
+        require_real_headwear: bool | None = None,
+    ) -> None:
+        self.validate_runtime_static_config_or_raise()
+
+        errors: list[str] = []
+
+        if not source_url.strip():
+            errors.append("SOURCE_URL is empty and runtime.export-video did not receive a source_url")
+
+        tracking_backend = self.person_tracking_backend.strip().lower()
+        if tracking_backend in {"disabled", "none", "off"}:
+            errors.append("PERSON_TRACKING_BACKEND must not be disabled for export-video")
+        if tracking_backend in {"development_simple", "simple", "dev_simple", "test"}:
+            if self.person_tracking_require_external:
+                errors.append("PERSON_TRACKING_REQUIRE_EXTERNAL=true rejects development_simple tracking backend")
+            if not self.person_tracking_allow_dev_simple:
+                errors.append("PERSON_TRACKING_ALLOW_DEV_SIMPLE=true is required for development_simple tracking backend")
+        if tracking_backend in {"ultralytics", "yolo", "yolo_track", "botsort", "bytetrack"}:
+            yolo_path = Path(self.yolo_model_path).expanduser() if self.yolo_model_path.strip() else None
+            if yolo_path is None:
+                errors.append("PERSON_MODEL_PATH is required for Ultralytics person tracking")
+            elif not self.person_allow_ultralytics_auto_download and not yolo_path.is_file():
+                errors.append(f"PERSON_MODEL_PATH does not exist locally: {yolo_path}")
+
+        headwear_mode = self.headwear_detector_mode.strip().lower()
+        collection_mode = bool(getattr(self, "person_crop_collection_enabled", False))
+        must_require_real_headwear = self.runtime_require_real_headwear if require_real_headwear is None else require_real_headwear
+        if collection_mode:
+            must_require_real_headwear = False
+
+        if must_require_real_headwear and headwear_mode == "placeholder":
+            errors.append("HEADWEAR_DETECTOR_MODE=placeholder is not allowed for target export-video")
+
+        head_detector_mode = self.head_detector_mode.strip().lower()
+        if must_require_real_headwear and head_detector_mode in {"disabled", "mock", "off", "none"}:
+            errors.append("HEAD_DETECTOR_MODE=disabled/mock is not allowed when RUNTIME_REQUIRE_REAL_HEADWEAR=true")
+        if head_detector_mode in {"onnx", "onnx_detector"}:
+            if not self.head_detector_model_path.strip():
+                errors.append("HEAD_DETECTOR_MODEL_PATH must not be empty for ONNX head detector")
+            else:
+                head_path = Path(self.head_detector_model_path).expanduser()
+                if not head_path.is_file():
+                    errors.append(f"HEAD_DETECTOR_MODEL_PATH does not exist locally: {head_path}")
+        if head_detector_mode in {"legacy", "legacy_geometry", "geometry"} and not self.allow_legacy_geometry_head_fallback:
+            errors.append("ALLOW_LEGACY_GEOMETRY_HEAD_FALLBACK=true is required for legacy geometry head detector")
+
+        if must_require_real_headwear and headwear_mode in {"onnx_classifier", "onnx_detector"}:
+            if not self.headwear_model_path.strip():
+                errors.append("HEADWEAR_MODEL_PATH must not be empty for ONNX headwear detector")
+            else:
+                headwear_path = Path(self.headwear_model_path).expanduser()
+                if not headwear_path.is_file():
+                    errors.append(f"HEADWEAR_MODEL_PATH does not exist locally: {headwear_path}")
+
+        if self.body_embedder_mode.strip().lower() == "onnx" and self.body_embedder_strict_backend:
+            if not self.body_embedding_model_path.strip():
+                errors.append(
+                    "BODY_EMBEDDING_MODEL_PATH must not be empty when BODY_EMBEDDER_MODE=onnx "
+                    "and BODY_EMBEDDER_STRICT_BACKEND=true"
+                )
+            else:
+                body_path = Path(self.body_embedding_model_path).expanduser()
+                if not body_path.is_file():
+                    errors.append(f"BODY_EMBEDDING_MODEL_PATH does not exist locally: {body_path}")
+
+        if errors:
+            raise ValueError("Runtime export rejected: " + "; ".join(errors))
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
